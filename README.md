@@ -8,67 +8,66 @@ PHP와 MySQL 기반으로 구현된 사주·운세 분석 웹 서비스입니다
 
 ### 사용자 기능
 
-* 회원가입, 로그인, 로그아웃
-* CSRF 토큰 기반 폼 보호
-* 비밀번호 해시 저장
-* 회원가입 시 기본 티켓 지급
-* 다중 사주 프로필 등록, 수정, 삭제, 기본 프로필 설정
-* 사주 분석 이력 저장 및 조회
-* 티켓 사용 내역 조회
-* 모바일 하단 네비게이션 중심의 반응형 UI
+- 회원가입, 로그인, 로그아웃
+- CSRF 토큰 기반 폼 보호
+- 비밀번호 해시 저장
+- 회원가입 시 기본 티켓 지급
+- 다중 사주 프로필 등록, 수정, 삭제, 기본 프로필 설정
+- 사주 분석 이력 저장 및 조회
+- 티켓 사용 내역 조회
+- 모바일 하단 네비게이션 중심의 반응형 UI
 
 ### 사주/운세 기능
 
-* 기본 사주 분석
-* 오행 분석
-* 십신 분석
-* 격국 분석
-* 대운 분석
-* 세운 분석
-* 종합 운세 분석
-* 신년운세
-* 토정비결형 연간 운세
-* 오늘/내일/지정일 운세
-* 재물운, 애정운, 직업운, 건강운 집중 풀이
-* 짝궁합 분석
-* 정통사주 리포트
-* 간단 심리풀이
-* 관상 페이지 UI
+- 기본 사주 분석
+- 오행 분석
+- 십신 분석
+- 격국 분석
+- 대운 분석
+- 세운 분석
+- 종합 운세 분석
+- 신년운세
+- 토정비결형 연간 운세
+- 오늘/내일/지정일 운세
+- 재물운, 애정운, 직업운, 건강운 집중 풀이
+- 짝궁합 분석
+- 정통사주 리포트
+- 간단 심리풀이
+- 관상 페이지 UI
 
 ### 관리자 기능
 
-* 관리자 대시보드
-* 회원 목록 및 상세 조회
-* 회원 권한 변경
-* 개별 회원 티켓 지급/차감
-* 전체 회원 티켓 일괄 지급
-* 티켓 로그 조회
-* 분석 기록 조회
-* 관리자용 보고서 생성
-* 공유 링크 기반 보고서 열람
-* 이메일 발송 함수 기반 보고서 링크 전송
+- 관리자 대시보드
+- 회원 목록 및 상세 조회
+- 회원 권한 변경
+- 개별 회원 티켓 지급/차감
+- 전체 회원 티켓 일괄 지급
+- 티켓 로그 조회
+- 분석 기록 조회
+- 관리자용 보고서 생성
+- 공유 링크 기반 보고서 열람
+- 이메일 발송 함수 기반 보고서 링크 전송
 
 ## 기술 스택
 
-* Backend: PHP
-* Database: MySQL 또는 MariaDB
-* DB Access: PDO
-* Frontend: HTML, CSS, JavaScript
-* UI Assets: Font Awesome, Google Fonts, Chart.js CDN
-* 권장 실행 환경: XAMPP, APM, 또는 PHP + MySQL 서버
+- Backend: PHP
+- Database: MySQL 또는 MariaDB
+- DB Access: PDO
+- Frontend: HTML, CSS, JavaScript
+- UI Assets: Font Awesome, Google Fonts, Chart.js CDN
+- 권장 실행 환경: XAMPP, APM, 또는 PHP + MySQL 서버
 
 ## 권장 요구사항
 
-* PHP 7.4 이상 권장
-* MySQL 5.7 이상 또는 MariaDB 10.2 이상 권장
-* PHP 확장
-
-  * `pdo_mysql`
-  * `mbstring`
-  * `json`
-  * `openssl`
-* Apache 또는 Nginx
-* 로컬 개발 시 XAMPP 권장
+- PHP 7.4 이상 권장
+- MySQL 5.7 이상 또는 MariaDB 10.2 이상 권장
+- PHP 확장
+  - `pdo_mysql`
+  - `mbstring`
+  - `json`
+  - `openssl`
+- Apache 또는 Nginx
+- 로컬 개발 시 XAMPP 권장
 
 ## 프로젝트 구조
 
@@ -186,12 +185,12 @@ http://localhost/saju/install.php
 
 설치 버튼을 누르면 다음 작업이 수행됩니다.
 
-* `saju_db` 데이터베이스 생성
-* 기본 테이블 생성
-* 관리자 계정 생성
-* 테스트 사용자 계정 생성
-* 초기 티켓 로그 생성
-* `install.lock` 생성
+- `saju_db` 데이터베이스 생성
+- 기본 테이블 생성
+- 관리자 계정 생성
+- 테스트 사용자 계정 생성
+- 초기 티켓 로그 생성
+- `install.lock` 생성
 
 ### 5. 접속
 
@@ -207,41 +206,41 @@ http://localhost/saju
 
 설치 스크립트는 테스트용 계정을 생성합니다.
 
-| 구분     | 이메일              | 비밀번호        |
-| ------ | ---------------- | ----------- |
-| 관리자    | `admin@saju.com` | `admin1234` |
-| 일반 사용자 | `user@saju.com`  | `user1234`  |
+| 구분 | 이메일 | 비밀번호 |
+|---|---|---|
+| 관리자 | `admin@saju.com` | `admin1234` |
+| 일반 사용자 | `user@saju.com` | `user1234` |
 
 운영 환경에서는 기본 계정을 즉시 삭제하거나 비밀번호를 변경해야 합니다.
 
 ## 주요 URL
 
-| 기능       | URL                       |
-| -------- | ------------------------- |
-| 메인       | `/saju/`                  |
-| 설치       | `/saju/install.php`       |
-| 로그인      | `/saju/auth/login.php`    |
-| 회원가입     | `/saju/auth/register.php` |
-| 홈        | `/saju/pages/home.php`    |
-| 사주 분석    | `/saju/pages/analyze.php` |
-| 프리미엄 분석  | `/saju/pages/premium.php` |
-| 마이페이지    | `/saju/pages/mypage.php`  |
-| 관리자 대시보드 | `/saju/admin/index.php`   |
-| 회원 관리    | `/saju/admin/users.php`   |
-| 티켓 관리    | `/saju/admin/tickets.php` |
-| 보고서 생성   | `/saju/admin/report.php`  |
+| 기능 | URL |
+|---|---|
+| 메인 | `/saju/` |
+| 설치 | `/saju/install.php` |
+| 로그인 | `/saju/auth/login.php` |
+| 회원가입 | `/saju/auth/register.php` |
+| 홈 | `/saju/pages/home.php` |
+| 사주 분석 | `/saju/pages/analyze.php` |
+| 프리미엄 분석 | `/saju/pages/premium.php` |
+| 마이페이지 | `/saju/pages/mypage.php` |
+| 관리자 대시보드 | `/saju/admin/index.php` |
+| 회원 관리 | `/saju/admin/users.php` |
+| 티켓 관리 | `/saju/admin/tickets.php` |
+| 보고서 생성 | `/saju/admin/report.php` |
 
 ## 데이터베이스 테이블
 
 설치 스크립트 기준으로 생성되는 주요 테이블은 다음과 같습니다.
 
-| 테이블                    | 설명                                     |
-| ---------------------- | -------------------------------------- |
-| `saju_users`           | 회원 정보, 권한, 보유 티켓                       |
-| `saju_fortune_history` | 사주 분석 입력값 및 분석 결과 JSON 저장              |
-| `saju_ticket_logs`     | 티켓 지급/사용 로그                            |
-| `saju_profiles`        | 회원별 다중 사주 프로필                          |
-| `saju_shared_reports`  | 관리자 보고서 공유 링크 저장. 보고서 공유 기능 사용 시 자동 생성 |
+| 테이블 | 설명 |
+|---|---|
+| `saju_users` | 회원 정보, 권한, 보유 티켓 |
+| `saju_fortune_history` | 사주 분석 입력값 및 분석 결과 JSON 저장 |
+| `saju_ticket_logs` | 티켓 지급/사용 로그 |
+| `saju_profiles` | 회원별 다중 사주 프로필 |
+| `saju_shared_reports` | 관리자 보고서 공유 링크 저장. 보고서 공유 기능 사용 시 자동 생성 |
 
 ## 티켓 정책
 
@@ -300,32 +299,32 @@ ini_set('log_errors', 1);
 
 ## 개발 참고사항
 
-* Composer 의존성은 확인되지 않습니다.
-* CSS와 JavaScript는 `assets/` 아래에서 직접 관리합니다.
-* 차트는 Chart.js CDN을 사용합니다.
-* 아이콘은 Font Awesome CDN을 사용합니다.
-* 폰트는 Google Fonts의 Noto Sans KR을 사용합니다.
-* 분석 결과는 `saju_fortune_history` 테이블에 JSON 형태로 저장됩니다.
-* 프로필 관리 API는 `pages/api_profiles.php`에서 AJAX 방식으로 처리합니다.
-* 보고서 공유 기능은 `saju_shared_reports` 테이블을 런타임에 생성할 수 있습니다.
+- Composer 의존성은 확인되지 않습니다.
+- CSS와 JavaScript는 `assets/` 아래에서 직접 관리합니다.
+- 차트는 Chart.js CDN을 사용합니다.
+- 아이콘은 Font Awesome CDN을 사용합니다.
+- 폰트는 Google Fonts의 Noto Sans KR을 사용합니다.
+- 분석 결과는 `saju_fortune_history` 테이블에 JSON 형태로 저장됩니다.
+- 프로필 관리 API는 `pages/api_profiles.php`에서 AJAX 방식으로 처리합니다.
+- 보고서 공유 기능은 `saju_shared_reports` 테이블을 런타임에 생성할 수 있습니다.
 
 ## 운영 전 체크리스트
 
 운영 배포 전에는 아래 항목을 반드시 확인하세요.
 
-* `install.php` 삭제 또는 접근 차단
-* `install.lock` 유지
-* 기본 관리자/사용자 계정 삭제 또는 비밀번호 변경
-* `config/database.php`의 DB 계정 변경
-* `display_errors` 비활성화
-* HTTPS 적용
-* 세션 쿠키 보안 옵션 적용
-* 관리자 페이지 접근 제한 강화
-* DB 백업 정책 수립
-* PHP `mail()` 사용 시 실제 SMTP/메일 발송 환경 검증
-* `.bak`, `test_phase*.php`, `test_profiles.php`, `migrate_profiles.php` 등 개발/백업 파일 제거 또는 접근 차단
-* `__MACOSX` 폴더와 `._` 메타 파일 제거
-* 개인정보 처리방침, 이용약관, 환불/티켓 정책, 운세 콘텐츠 면책 문구 추가
+- `install.php` 삭제 또는 접근 차단
+- `install.lock` 유지
+- 기본 관리자/사용자 계정 삭제 또는 비밀번호 변경
+- `config/database.php`의 DB 계정 변경
+- `display_errors` 비활성화
+- HTTPS 적용
+- 세션 쿠키 보안 옵션 적용
+- 관리자 페이지 접근 제한 강화
+- DB 백업 정책 수립
+- PHP `mail()` 사용 시 실제 SMTP/메일 발송 환경 검증
+- `.bak`, `test_phase*.php`, `test_profiles.php`, `migrate_profiles.php` 등 개발/백업 파일 제거 또는 접근 차단
+- `__MACOSX` 폴더와 `._` 메타 파일 제거
+- 개인정보 처리방침, 이용약관, 환불/티켓 정책, 운세 콘텐츠 면책 문구 추가
 
 ## 주의사항
 
@@ -343,4 +342,8 @@ ini_set('log_errors', 1);
 
 ## 라이선스
 
-별도 라이선스 파일은 포함되어 있지 않습니다. 외부에 공개하거나 상업적으로 배포할 경우 프로젝트 소유자 기준의 라이선스를 명시하세요.
+이 프로젝트는 MIT License로 배포됩니다. 자세한 내용은 저장소 루트의 `LICENSE` 파일을 확인하세요.
+
+```text
+SPDX-License-Identifier: MIT
+```
