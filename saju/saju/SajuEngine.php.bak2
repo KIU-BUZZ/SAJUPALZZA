@@ -1,0 +1,751 @@
+<?php
+/**
+ * 사주팔자 계산 엔진 (정밀 버전)
+ * 
+ * 한국 전통 명리학 기준으로 정밀 구현
+ * - 년주: 입춘 절입 시각 기준
+ * - 월주: 24절기 절입 시각 기준 (절기표 내장)
+ * - 일주: 율리우스 적일 기반 정밀 계산
+ * - 시주: 일간 기준 오자원둔법
+ * - 지장간(地藏干): 지지에 암장된 천간
+ * - 공망(空亡) 계산
+ * - 삼합/방합/육합/형충파해 관계 분석
+ * - 신강/신약 판별
+ */
+
+class SajuEngine {
+
+    // ===== 천간 (10 Heavenly Stems) =====
+    const CHEONGAN = ['갑', '을', '병', '정', '무', '기', '경', '신', '임', '계'];
+    const CHEONGAN_HANJA = ['甲', '乙', '丙', '丁', '戊', '己', '庚', '辛', '壬', '癸'];
+
+    // ===== 지지 (12 Earthly Branches) =====
+    const JIJI = ['자', '축', '인', '묘', '진', '사', '오', '미', '신', '유', '술', '해'];
+    const JIJI_HANJA = ['子', '丑', '寅', '卯', '辰', '巳', '午', '未', '申', '酉', '戌', '亥'];
+
+    // ===== 오행 (Five Elements) =====
+    const OHANG = ['목', '화', '토', '금', '수'];
+    const OHANG_HANJA = ['木', '火', '土', '金', '水'];
+    const OHANG_COLORS = ['#4CAF50', '#F44336', '#FF9800', '#FFD700', '#2196F3'];
+
+    // 천간 → 오행
+    const CHEONGAN_OHANG = [
+        '갑' => '목', '을' => '목', '병' => '화', '정' => '화', '무' => '토',
+        '기' => '토', '경' => '금', '신' => '금', '임' => '수', '계' => '수'
+    ];
+
+    // 지지 → 오행 (본기 기준)
+    const JIJI_OHANG = [
+        '자' => '수', '축' => '토', '인' => '목', '묘' => '목',
+        '진' => '토', '사' => '화', '오' => '화', '미' => '토',
+        '신' => '금', '유' => '금', '술' => '토', '해' => '수'
+    ];
+
+    // 천간 음양 (0=양, 1=음)
+    const CHEONGAN_YINYANG = [0, 1, 0, 1, 0, 1, 0, 1, 0, 1];
+    // 지지 음양
+    const JIJI_YINYANG = [0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1];
+
+    // ===== 지장간(地藏干) - 지지에 암장된 천간 [간, 비율] =====
+    // 순서: 여기(餘氣) → 중기(中氣) → 본기(本氣)
+    const JIJANGGAN = [
+        '자' => [['임', 0.3], ['계', 0.7]],
+        '축' => [['계', 0.3], ['신', 0.3], ['기', 0.4]],
+        '인' => [['무', 0.3], ['병', 0.3], ['갑', 0.4]],
+        '묘' => [['갑', 0.3], ['을', 0.7]],
+        '진' => [['을', 0.3], ['계', 0.3], ['무', 0.4]],
+        '사' => [['무', 0.3], ['경', 0.3], ['병', 0.4]],
+        '오' => [['병', 0.3], ['기', 0.3], ['정', 0.4]],
+        '미' => [['정', 0.3], ['을', 0.3], ['기', 0.4]],
+        '신' => [['무', 0.3], ['임', 0.3], ['경', 0.4]],
+        '유' => [['경', 0.3], ['신', 0.7]],
+        '술' => [['신', 0.3], ['정', 0.3], ['무', 0.4]],
+        '해' => [['무', 0.3], ['갑', 0.3], ['임', 0.4]],
+    ];
+
+    // ===== 절기 데이터 =====
+    // 사주월 => [절기이름, 태양황경, 양력월, 평균일]
+    const JEOLGI_MAP = [
+        1  => ['입춘', 315, 2, 4],
+        2  => ['경칩', 345, 3, 6],
+        3  => ['청명', 15,  4, 5],
+        4  => ['입하', 45,  5, 6],
+        5  => ['망종', 75,  6, 6],
+        6  => ['소서', 105, 7, 7],
+        7  => ['입추', 135, 8, 7],
+        8  => ['백로', 165, 9, 8],
+        9  => ['한로', 195, 10, 8],
+        10 => ['입동', 225, 11, 7],
+        11 => ['대설', 255, 12, 7],
+        12 => ['소한', 285, 1, 6],
+    ];
+
+    // 연도별 입춘 시각 [월, 일, 시, 분]
+    private static $ipchunData = [
+        1940=>[2,5,2,8],1941=>[2,4,8,1],1942=>[2,4,13,49],1943=>[2,4,19,40],
+        1944=>[2,5,1,23],1945=>[2,4,7,20],1946=>[2,4,13,5],1947=>[2,4,18,51],
+        1948=>[2,5,0,43],1949=>[2,4,6,30],1950=>[2,4,12,22],1951=>[2,4,18,14],
+        1952=>[2,5,0,0],1953=>[2,4,5,46],1954=>[2,4,11,31],1955=>[2,4,17,18],
+        1956=>[2,4,23,13],1957=>[2,4,4,55],1958=>[2,4,10,49],1959=>[2,4,16,42],
+        1960=>[2,4,22,23],1961=>[2,4,4,4],1962=>[2,4,9,58],1963=>[2,4,15,45],
+        1964=>[2,4,21,37],1965=>[2,4,3,23],1966=>[2,4,9,14],1967=>[2,4,14,55],
+        1968=>[2,4,20,48],1969=>[2,4,2,33],1970=>[2,4,8,28],1971=>[2,4,14,17],
+        1972=>[2,4,20,6],1973=>[2,4,1,49],1974=>[2,4,7,42],1975=>[2,4,13,28],
+        1976=>[2,4,19,19],1977=>[2,4,1,4],1978=>[2,4,6,50],1979=>[2,4,12,40],
+        1980=>[2,4,18,29],1981=>[2,4,0,15],1982=>[2,4,6,7],1983=>[2,4,11,57],
+        1984=>[2,4,17,42],1985=>[2,3,23,28],1986=>[2,4,5,17],1987=>[2,4,11,7],
+        1988=>[2,4,16,53],1989=>[2,3,22,36],1990=>[2,4,4,27],1991=>[2,4,10,15],
+        1992=>[2,4,16,4],1993=>[2,3,21,55],1994=>[2,4,3,39],1995=>[2,4,9,30],
+        1996=>[2,4,15,19],1997=>[2,3,21,3],1998=>[2,4,2,53],1999=>[2,4,8,42],
+        2000=>[2,4,14,32],2001=>[2,3,20,16],2002=>[2,4,2,8],2003=>[2,4,7,57],
+        2004=>[2,4,13,46],2005=>[2,3,19,34],2006=>[2,4,1,22],2007=>[2,4,7,14],
+        2008=>[2,4,12,58],2009=>[2,3,18,50],2010=>[2,4,0,42],2011=>[2,4,6,30],
+        2012=>[2,4,12,22],2013=>[2,3,18,13],2014=>[2,4,0,3],2015=>[2,4,5,55],
+        2016=>[2,4,11,46],2017=>[2,3,17,34],2018=>[2,3,23,25],2019=>[2,4,5,14],
+        2020=>[2,4,11,3],2021=>[2,3,16,59],2022=>[2,3,22,51],2023=>[2,4,4,43],
+        2024=>[2,4,10,27],2025=>[2,3,16,10],2026=>[2,3,22,2],2027=>[2,4,3,46],
+        2028=>[2,4,9,38],2029=>[2,3,15,20],2030=>[2,3,21,8],
+    ];
+
+    // ===== 연도별 월별 절기 절입일 [월,일] (2020-2030) =====
+    // 형식: 연도 => [사주월1(입춘), 사주월2(경칩), ..., 사주월12(소한)]
+    private static $monthlyJeolgiData = [
+        2020 => [[2,4],[3,5],[4,4],[5,5],[6,5],[7,6],[8,7],[9,7],[10,8],[11,7],[12,7],[1,6]],
+        2021 => [[2,3],[3,5],[4,4],[5,5],[6,5],[7,7],[8,7],[9,7],[10,8],[11,7],[12,7],[1,5]],
+        2022 => [[2,4],[3,5],[4,5],[5,5],[6,6],[7,7],[8,7],[9,7],[10,8],[11,7],[12,7],[1,5]],
+        2023 => [[2,4],[3,6],[4,5],[5,6],[6,6],[7,7],[8,7],[9,8],[10,8],[11,7],[12,7],[1,6]],
+        2024 => [[2,4],[3,5],[4,4],[5,5],[6,5],[7,6],[8,7],[9,7],[10,8],[11,7],[12,7],[1,6]],
+        2025 => [[2,3],[3,5],[4,4],[5,5],[6,5],[7,7],[8,7],[9,7],[10,8],[11,7],[12,7],[1,5]],
+        2026 => [[2,4],[3,5],[4,5],[5,5],[6,6],[7,7],[8,7],[9,7],[10,8],[11,7],[12,7],[1,5]],
+        2027 => [[2,4],[3,6],[4,5],[5,6],[6,6],[7,7],[8,7],[9,8],[10,8],[11,7],[12,7],[1,6]],
+        2028 => [[2,4],[3,5],[4,4],[5,5],[6,5],[7,6],[8,7],[9,7],[10,7],[11,7],[12,7],[1,6]],
+        2029 => [[2,3],[3,5],[4,4],[5,5],[6,5],[7,7],[8,7],[9,7],[10,8],[11,7],[12,7],[1,5]],
+        2030 => [[2,4],[3,5],[4,5],[5,5],[6,6],[7,7],[8,7],[9,7],[10,8],[11,7],[12,7],[1,5]],
+    ];
+
+    // 지지 → 띠
+    const ZODIAC_ANIMALS = [
+        '자'=>'쥐','축'=>'소','인'=>'호랑이','묘'=>'토끼',
+        '진'=>'용','사'=>'뱀','오'=>'말','미'=>'양',
+        '신'=>'원숭이','유'=>'닭','술'=>'개','해'=>'돼지'
+    ];
+
+    // 시간→지지
+    const HOUR_TO_JIJI = [
+        23=>0,0=>0,1=>1,2=>1,3=>2,4=>2,5=>3,6=>3,7=>4,8=>4,9=>5,10=>5,
+        11=>6,12=>6,13=>7,14=>7,15=>8,16=>8,17=>9,18=>9,19=>10,20=>10,21=>11,22=>11
+    ];
+
+    const SIJI_NAMES = [
+        '자시(子時) 23:00~01:00','축시(丑時) 01:00~03:00',
+        '인시(寅時) 03:00~05:00','묘시(卯時) 05:00~07:00',
+        '진시(辰時) 07:00~09:00','사시(巳時) 09:00~11:00',
+        '오시(午時) 11:00~13:00','미시(未時) 13:00~15:00',
+        '신시(申時) 15:00~17:00','유시(酉時) 17:00~19:00',
+        '술시(戌時) 19:00~21:00','해시(亥時) 21:00~23:00'
+    ];
+
+    // ===== 육합 =====
+    const YUKHAP = [['자','축'],['인','해'],['묘','술'],['진','유'],['사','신'],['오','미']];
+    // ===== 삼합 =====
+    const SAMHAP = [['신','자','진'],['해','묘','미'],['인','오','술'],['사','유','축']];
+    const SAMHAP_ELEMENT = ['수','목','화','금'];
+    // ===== 방합 =====
+    const BANGHAP = [['인','묘','진'],['사','오','미'],['신','유','술'],['해','자','축']];
+    const BANGHAP_ELEMENT = ['목','화','금','수'];
+    // ===== 형(刑) =====
+    const HYUNG = [['인','사','신'],['축','술','미'],['자','묘'],['진','진'],['오','오'],['유','유'],['해','해']];
+    // ===== 충(沖) =====
+    const CHUNG = [['자','오'],['축','미'],['인','신'],['묘','유'],['진','술'],['사','해']];
+    // ===== 파(破) =====
+    const PA = [['자','유'],['축','진'],['인','해'],['묘','오'],['사','신'],['미','술']];
+    // ===== 해(害) =====
+    const HAE = [['자','미'],['축','오'],['인','사'],['묘','진'],['신','해'],['유','술']];
+    // ===== 천간합 =====
+    const CHEONGAN_HAP = [['갑','기'],['을','경'],['병','신'],['정','임'],['무','계']];
+    const CHEONGAN_HAP_ELEMENT = ['토','금','수','목','화'];
+    // ===== 천간충 =====
+    const CHEONGAN_CHUNG = [['갑','경'],['을','신'],['병','임'],['정','계']];
+
+    // ===== 인스턴스 변수 =====
+    private $birthYear;
+    private $birthMonth;
+    private $birthDay;
+    private $birthHour;
+    private $gender;
+    private $calendarType;
+    private $solarDate;
+    private $yearPillar;
+    private $monthPillar;
+    private $dayPillar;
+    private $hourPillar;
+
+    public function __construct($year, $month, $day, $hour, $gender, $calendarType = 'solar') {
+        $this->birthYear = (int)$year;
+        $this->birthMonth = (int)$month;
+        $this->birthDay = (int)$day;
+        $this->birthHour = ($hour !== null && $hour !== '' && (int)$hour >= 0) ? (int)$hour : null;
+        $this->gender = $gender;
+        $this->calendarType = $calendarType;
+
+        if ($calendarType === 'lunar') {
+            $this->convertLunarToSolar();
+        } else {
+            $this->solarDate = ['year'=>$this->birthYear,'month'=>$this->birthMonth,'day'=>$this->birthDay];
+        }
+        $this->calculate();
+    }
+
+    // ===== 음력→양력 변환 (Meeus 기반 근사) =====
+    private function convertLunarToSolar() {
+        $y = $this->birthYear;
+        $m = $this->birthMonth;
+        $d = $this->birthDay;
+        $lunarNewYear = $this->estimateLunarNewYear($y);
+        $lunarDaysSinceNewYear = ($m - 1) * 29.5 + $d - 1;
+        $ts = mktime(0,0,0,$lunarNewYear[0],$lunarNewYear[1],$y);
+        $ts += (int)($lunarDaysSinceNewYear * 86400);
+        $this->solarDate = ['year'=>(int)date('Y',$ts),'month'=>(int)date('n',$ts),'day'=>(int)date('j',$ts)];
+    }
+
+    private function estimateLunarNewYear($year) {
+        $k = ($year - 2000) * 12.3685;
+        $k = round($k);
+        $jde = 2451550.09766 + 29.530588861 * $k;
+        $ts = (int)(($jde - 2440587.5) * 86400);
+        $m = (int)date('n', $ts);
+        $d = (int)date('j', $ts);
+        if ($m == 1 && $d < 21) {
+            $jde += 29.53;
+            $ts = (int)(($jde - 2440587.5) * 86400);
+            $m = (int)date('n', $ts);
+            $d = (int)date('j', $ts);
+        }
+        return [$m, $d];
+    }
+
+    // ===== 사주 계산 =====
+    private function calculate() {
+        $this->calculateYearPillar();
+        $this->calculateMonthPillar();
+        $this->calculateDayPillar();
+        $this->calculateHourPillar();
+    }
+
+    /**
+     * 년주 계산 - 입춘 기준 (시각까지 고려)
+     */
+    private function calculateYearPillar() {
+        $year = $this->solarDate['year'];
+        $month = $this->solarDate['month'];
+        $day = $this->solarDate['day'];
+        $hour = $this->birthHour ?? 12;
+
+        $ipchun = self::getIpchunDateTime($year);
+        $beforeIpchun = false;
+        if ($month < $ipchun[0]) {
+            $beforeIpchun = true;
+        } elseif ($month == $ipchun[0]) {
+            if ($day < $ipchun[1]) {
+                $beforeIpchun = true;
+            } elseif ($day == $ipchun[1] && $hour < ($ipchun[2] ?? 0)) {
+                $beforeIpchun = true;
+            }
+        }
+        if ($beforeIpchun) $year -= 1;
+
+        $stemIndex = ($year - 4) % 10;
+        if ($stemIndex < 0) $stemIndex += 10;
+        $branchIndex = ($year - 4) % 12;
+        if ($branchIndex < 0) $branchIndex += 12;
+        $this->yearPillar = [$stemIndex, $branchIndex];
+    }
+
+    private static function getIpchunDateTime($year) {
+        return self::$ipchunData[$year] ?? [2, 4, 12, 0];
+    }
+
+    /**
+     * 월주 계산 - 절기 기반 + 오호둔갑법
+     */
+    private function calculateMonthPillar() {
+        $year = $this->solarDate['year'];
+        $month = $this->solarDate['month'];
+        $day = $this->solarDate['day'];
+
+        $sajuMonth = $this->getSajuMonth($year, $month, $day);
+        $monthBranch = ($sajuMonth + 1) % 12;
+
+        // 오호둔갑법(五虎遁甲法)
+        $yearStem = $this->yearPillar[0];
+        $monthStemStart = ($yearStem % 5) * 2 + 2;
+        $monthStem = ($monthStemStart + $sajuMonth - 1) % 10;
+        $this->monthPillar = [$monthStem, $monthBranch];
+    }
+
+    /**
+     * 절기 기반 사주 월 계산 (정밀)
+     */
+    private function getSajuMonth($year, $month, $day) {
+        // 정밀 절기 데이터가 있으면 사용
+        if (isset(self::$monthlyJeolgiData[$year])) {
+            $data = self::$monthlyJeolgiData[$year];
+            for ($sm = 0; $sm < 12; $sm++) {
+                $cur = $data[$sm];
+                $next = ($sm < 11) ? $data[$sm + 1] : (self::$monthlyJeolgiData[$year + 1][0] ?? [2, 4]);
+
+                $curMonth = $cur[0];
+                $curDay = $cur[1];
+                $nextMonth = $next[0];
+                $nextDay = $next[1];
+                $sajuMonth = $sm + 1;
+
+                if ($curMonth > $nextMonth) {
+                    if (($month > $curMonth || ($month == $curMonth && $day >= $curDay)) ||
+                        ($month < $nextMonth || ($month == $nextMonth && $day < $nextDay))) {
+                        return $sajuMonth;
+                    }
+                } else {
+                    if (($month > $curMonth || ($month == $curMonth && $day >= $curDay)) &&
+                        ($month < $nextMonth || ($month == $nextMonth && $day < $nextDay))) {
+                        return $sajuMonth;
+                    }
+                }
+            }
+        }
+
+        // 범용 절기 계산 (다른 연도)
+        for ($sm = 1; $sm <= 12; $sm++) {
+            $cur = self::getJeolgiDateGeneric($year, $sm);
+            $next = ($sm < 12) ? self::getJeolgiDateGeneric($year, $sm + 1) : self::getJeolgiDateGeneric($year + 1, 1);
+
+            $curMonth = $cur[0]; $curDay = $cur[1];
+            $nextMonth = $next[0]; $nextDay = $next[1];
+
+            if ($curMonth > $nextMonth) {
+                if (($month > $curMonth || ($month == $curMonth && $day >= $curDay)) ||
+                    ($month < $nextMonth || ($month == $nextMonth && $day < $nextDay))) {
+                    return $sm;
+                }
+            } else {
+                if (($month > $curMonth || ($month == $curMonth && $day >= $curDay)) &&
+                    ($month < $nextMonth || ($month == $nextMonth && $day < $nextDay))) {
+                    return $sm;
+                }
+            }
+        }
+        return 1;
+    }
+
+    /**
+     * 일반 절기일 근사 계산
+     */
+    private static function getJeolgiDateGeneric($year, $sajuMonth) {
+        $info = self::JEOLGI_MAP[$sajuMonth];
+        $solarMonth = $info[2];
+        $avgDay = $info[3];
+        // 4년 주기 미세 보정
+        $yearMod = $year % 4;
+        $correction = ($yearMod === 3) ? -1 : 0;
+        $day = $avgDay + $correction;
+        if ($day < 1) $day = 1;
+        return [$solarMonth, $day];
+    }
+
+    /**
+     * 일주 계산 (율리우스 적일 기반)
+     */
+    private function calculateDayPillar() {
+        $jd = $this->getJulianDay($this->solarDate['year'], $this->solarDate['month'], $this->solarDate['day']);
+        $refJD = 2451551; // 2000-01-07 = 甲子일
+        $dayIndex = ($jd - $refJD) % 60;
+        if ($dayIndex < 0) $dayIndex += 60;
+
+        $stemIndex = $dayIndex % 10;
+        $branchIndex = $dayIndex % 12;
+
+        // 야자시(夜子時): 23시 이후는 다음 날 일주
+        if ($this->birthHour !== null && $this->birthHour >= 23) {
+            $dayIndex = ($dayIndex + 1) % 60;
+            $stemIndex = $dayIndex % 10;
+            $branchIndex = $dayIndex % 12;
+        }
+        $this->dayPillar = [$stemIndex, $branchIndex];
+    }
+
+    /**
+     * 시주 계산 - 오자원둔법(五子元遁法)
+     */
+    private function calculateHourPillar() {
+        if ($this->birthHour === null) {
+            $this->hourPillar = [null, null];
+            return;
+        }
+        $hourBranch = self::HOUR_TO_JIJI[$this->birthHour];
+        $dayStem = $this->dayPillar[0];
+        $hourStemStart = ($dayStem % 5) * 2;
+        $hourStem = ($hourStemStart + $hourBranch) % 10;
+        $this->hourPillar = [$hourStem, $hourBranch];
+    }
+
+    private function getJulianDay($year, $month, $day) {
+        if ($month <= 2) { $year -= 1; $month += 12; }
+        $A = floor($year / 100);
+        $B = 2 - $A + floor($A / 4);
+        return (int)(floor(365.25 * ($year + 4716)) + floor(30.6001 * ($month + 1)) + $day + $B - 1524);
+    }
+
+    // ===== 관계 분석 =====
+
+    /**
+     * 사주 내 모든 합충형파해 관계 분석
+     */
+    public function analyzeRelationships() {
+        $pillarNames = ['년','월','일','시'];
+        $pillars = [$this->yearPillar, $this->monthPillar, $this->dayPillar, $this->hourPillar];
+
+        $branches = [];
+        $stems = [];
+        foreach ($pillars as $p) {
+            $branches[] = ($p[1] !== null) ? self::JIJI[$p[1]] : null;
+            $stems[] = ($p[0] !== null) ? self::CHEONGAN[$p[0]] : null;
+        }
+
+        $relations = [];
+
+        // --- 지지 관계 ---
+        // 육합
+        for ($i = 0; $i < 4; $i++) {
+            for ($j = $i+1; $j < 4; $j++) {
+                if (!$branches[$i] || !$branches[$j]) continue;
+                foreach (self::YUKHAP as $pair) {
+                    if ($this->matchPair($branches[$i], $branches[$j], $pair)) {
+                        $relations[] = ['type'=>'육합','position'=>$pillarNames[$i].$pillarNames[$j],
+                            'chars'=>$branches[$i].$branches[$j],'meaning'=>$branches[$i].$branches[$j].' 육합 - 화합과 결합의 기운. 관계에서 긍정적 시너지를 냅니다.'];
+                    }
+                }
+            }
+        }
+        // 삼합
+        foreach (self::SAMHAP as $idx => $trio) {
+            $found=[]; $pos=[];
+            foreach ($branches as $bi => $b) {
+                if ($b && in_array($b, $trio)) { $found[]=$b; $pos[]=$pillarNames[$bi]; }
+            }
+            if (count($found) >= 2) {
+                $el = self::SAMHAP_ELEMENT[$idx];
+                $full = (count($found) === 3);
+                $relations[] = ['type'=>'삼합','position'=>implode('',$pos),'chars'=>implode('',$found), 'element'=>$el,
+                    'meaning'=>implode('',$found).($full?' 완전삼합':' 반합')." ({$el}국) - ".($full?'매우 강력한 합의 기운이 작용합니다.':'부분적 합이 작용합니다.')];
+            }
+        }
+        // 방합
+        foreach (self::BANGHAP as $idx => $trio) {
+            $found=[]; $pos=[];
+            foreach ($branches as $bi => $b) {
+                if ($b && in_array($b, $trio)) { $found[]=$b; $pos[]=$pillarNames[$bi]; }
+            }
+            if (count($found) >= 3) {
+                $el = self::BANGHAP_ELEMENT[$idx];
+                $relations[] = ['type'=>'방합','position'=>implode('',$pos),'chars'=>implode('',$found),'element'=>$el,
+                    'meaning'=>implode('',$found)." 방합 ({$el}국) - 방위의 강력한 결합으로 {$el}의 기운이 극대화됩니다."];
+            }
+        }
+        // 충
+        for ($i=0;$i<4;$i++) for ($j=$i+1;$j<4;$j++) {
+            if (!$branches[$i]||!$branches[$j]) continue;
+            foreach (self::CHUNG as $pair) {
+                if ($this->matchPair($branches[$i],$branches[$j],$pair)) {
+                    $desc = $this->getChungDescription($branches[$i],$branches[$j],$pillarNames[$i],$pillarNames[$j]);
+                    $relations[] = ['type'=>'충','position'=>$pillarNames[$i].$pillarNames[$j],
+                        'chars'=>$branches[$i].$branches[$j],'meaning'=>$desc];
+                }
+            }
+        }
+        // 형
+        for ($i=0;$i<4;$i++) for ($j=$i+1;$j<4;$j++) {
+            if (!$branches[$i]||!$branches[$j]) continue;
+            foreach (self::HYUNG as $group) {
+                if (count($group)>=2 && $this->matchPair($branches[$i],$branches[$j],[$group[0],$group[1]])) {
+                    $relations[] = ['type'=>'형','position'=>$pillarNames[$i].$pillarNames[$j],
+                        'chars'=>$branches[$i].$branches[$j],'meaning'=>$branches[$i].$branches[$j].' 형 - 갈등과 시련의 기운이 있으나, 이를 통해 성장할 수 있습니다.'];
+                }
+            }
+        }
+        // 해
+        for ($i=0;$i<4;$i++) for ($j=$i+1;$j<4;$j++) {
+            if (!$branches[$i]||!$branches[$j]) continue;
+            foreach (self::HAE as $pair) {
+                if ($this->matchPair($branches[$i],$branches[$j],$pair)) {
+                    $relations[] = ['type'=>'해','position'=>$pillarNames[$i].$pillarNames[$j],
+                        'chars'=>$branches[$i].$branches[$j],'meaning'=>$branches[$i].$branches[$j].' 해 - 보이지 않는 방해와 손실에 주의가 필요합니다.'];
+                }
+            }
+        }
+        // 파
+        for ($i=0;$i<4;$i++) for ($j=$i+1;$j<4;$j++) {
+            if (!$branches[$i]||!$branches[$j]) continue;
+            foreach (self::PA as $pair) {
+                if ($this->matchPair($branches[$i],$branches[$j],$pair)) {
+                    $relations[] = ['type'=>'파','position'=>$pillarNames[$i].$pillarNames[$j],
+                        'chars'=>$branches[$i].$branches[$j],'meaning'=>$branches[$i].$branches[$j].' 파 - 진행 중인 일에 변수가 생길 수 있습니다.'];
+                }
+            }
+        }
+
+        // --- 천간 관계 ---
+        // 천간합
+        for ($i=0;$i<4;$i++) for ($j=$i+1;$j<4;$j++) {
+            if (!$stems[$i]||!$stems[$j]) continue;
+            foreach (self::CHEONGAN_HAP as $idx => $pair) {
+                if ($this->matchPair($stems[$i],$stems[$j],$pair)) {
+                    $el = self::CHEONGAN_HAP_ELEMENT[$idx];
+                    $relations[] = ['type'=>'천간합','position'=>$pillarNames[$i].'간'.$pillarNames[$j].'간',
+                        'chars'=>$stems[$i].$stems[$j],'element'=>$el,
+                        'meaning'=>$stems[$i].$stems[$j]." 합→{$el} - 천간의 화합으로 {$el}의 기운이 강화됩니다."];
+                }
+            }
+        }
+        // 천간충
+        for ($i=0;$i<4;$i++) for ($j=$i+1;$j<4;$j++) {
+            if (!$stems[$i]||!$stems[$j]) continue;
+            foreach (self::CHEONGAN_CHUNG as $pair) {
+                if ($this->matchPair($stems[$i],$stems[$j],$pair)) {
+                    $relations[] = ['type'=>'천간충','position'=>$pillarNames[$i].'간'.$pillarNames[$j].'간',
+                        'chars'=>$stems[$i].$stems[$j],'meaning'=>$stems[$i].$stems[$j].' 충 - 천간의 기운이 충돌하여 변화가 일어납니다.'];
+                }
+            }
+        }
+
+        return $relations;
+    }
+
+    private function matchPair($a, $b, $pair) {
+        return ($a === $pair[0] && $b === $pair[1]) || ($a === $pair[1] && $b === $pair[0]);
+    }
+
+    private function getChungDescription($a, $b, $posA, $posB) {
+        $posDesc = ['년'=>'선천적/조상','월'=>'사회적/부모','일'=>'자신/배우자','시'=>'미래/자녀'];
+        $pa = $posDesc[$posA] ?? ''; $pb = $posDesc[$posB] ?? '';
+        return "{$a}{$b} 충 - {$pa} 영역과 {$pb} 영역에서 변동과 충돌의 에너지가 있습니다. 변화와 이동수가 있을 수 있습니다.";
+    }
+
+    /**
+     * 공망 계산
+     */
+    public function getGongmang() {
+        $stemIdx = $this->dayPillar[0];
+        $branchIdx = $this->dayPillar[1];
+        $dayIn60 = 0;
+        for ($i = 0; $i < 60; $i++) {
+            if ($i % 10 === $stemIdx && $i % 12 === $branchIdx) { $dayIn60 = $i; break; }
+        }
+        $xunStart = (int)floor($dayIn60 / 10) * 10;
+        $usedBranches = [];
+        for ($i = 0; $i < 10; $i++) $usedBranches[] = ($xunStart + $i) % 12;
+        $missing = [];
+        for ($b = 0; $b < 12; $b++) {
+            if (!in_array($b, $usedBranches)) $missing[] = self::JIJI[$b];
+        }
+        return $missing;
+    }
+
+    // ===== 결과 =====
+
+    public function getResult() {
+        return [
+            'input' => [
+                'year'=>$this->birthYear,'month'=>$this->birthMonth,'day'=>$this->birthDay,
+                'hour'=>$this->birthHour,'gender'=>$this->gender,'calendar_type'=>$this->calendarType,
+            ],
+            'solar_date' => $this->solarDate,
+            'year_pillar' => $this->getPillarInfo($this->yearPillar),
+            'month_pillar' => $this->getPillarInfo($this->monthPillar),
+            'day_pillar' => $this->getPillarInfo($this->dayPillar),
+            'hour_pillar' => $this->getPillarInfo($this->hourPillar),
+            'zodiac' => self::ZODIAC_ANIMALS[self::JIJI[$this->yearPillar[1]]],
+            'day_master' => self::CHEONGAN[$this->dayPillar[0]],
+            'day_master_element' => self::CHEONGAN_OHANG[self::CHEONGAN[$this->dayPillar[0]]],
+            'siji_name' => ($this->birthHour !== null) ? self::SIJI_NAMES[self::HOUR_TO_JIJI[$this->birthHour]] : '시간 미상',
+            'jijanggan' => $this->getJijangganInfo(),
+            'gongmang' => $this->getGongmang(),
+            'relationships' => $this->analyzeRelationships(),
+            'day_master_strength' => $this->getDayMasterStrength(),
+        ];
+    }
+
+    private function getJijangganInfo() {
+        $pillars = ['year'=>$this->yearPillar,'month'=>$this->monthPillar,'day'=>$this->dayPillar,'hour'=>$this->hourPillar];
+        $labels = ['여기','중기','본기'];
+        $info = [];
+        foreach ($pillars as $key => $p) {
+            if ($p[1] === null) { $info[$key]=[]; continue; }
+            $branch = self::JIJI[$p[1]];
+            $jjg = self::JIJANGGAN[$branch];
+            $details = [];
+            foreach ($jjg as $idx => $item) {
+                $gan = $item[0]; $ratio = $item[1];
+                $element = self::CHEONGAN_OHANG[$gan];
+                $lbl = (count($jjg)===2) ? ($idx===0?'여기':'본기') : ($labels[$idx] ?? '본기');
+                $details[] = ['gan'=>$gan,'hanja'=>self::CHEONGAN_HANJA[array_search($gan,self::CHEONGAN)],
+                    'element'=>$element,'element_hanja'=>self::OHANG_HANJA[array_search($element,self::OHANG)],
+                    'ratio'=>$ratio,'label'=>$lbl];
+            }
+            $info[$key] = $details;
+        }
+        return $info;
+    }
+
+    private function getPillarInfo($pillar) {
+        if ($pillar[0] === null || $pillar[1] === null) {
+            return ['stem'=>'?','branch'=>'?','stem_hanja'=>'?','branch_hanja'=>'?',
+                'stem_element'=>'토','branch_element'=>'토','stem_element_hanja'=>'土','branch_element_hanja'=>'土',
+                'stem_yinyang'=>'양','branch_yinyang'=>'양','stem_color'=>'#FF9800','branch_color'=>'#FF9800',
+                'text'=>'??','hanja'=>'??','stem_index'=>0,'branch_index'=>0];
+        }
+        $stem = self::CHEONGAN[$pillar[0]]; $branch = self::JIJI[$pillar[1]];
+        $stemHanja = self::CHEONGAN_HANJA[$pillar[0]]; $branchHanja = self::JIJI_HANJA[$pillar[1]];
+        $stemElement = self::CHEONGAN_OHANG[$stem]; $branchElement = self::JIJI_OHANG[$branch];
+        $stemYinyang = self::CHEONGAN_YINYANG[$pillar[0]]===0?'양':'음';
+        $branchYinyang = self::JIJI_YINYANG[$pillar[1]]===0?'양':'음';
+        $sci = array_search($stemElement, self::OHANG); $bci = array_search($branchElement, self::OHANG);
+        return [
+            'stem'=>$stem,'branch'=>$branch,'stem_hanja'=>$stemHanja,'branch_hanja'=>$branchHanja,
+            'stem_element'=>$stemElement,'branch_element'=>$branchElement,
+            'stem_element_hanja'=>self::OHANG_HANJA[$sci],'branch_element_hanja'=>self::OHANG_HANJA[$bci],
+            'stem_yinyang'=>$stemYinyang,'branch_yinyang'=>$branchYinyang,
+            'stem_color'=>self::OHANG_COLORS[$sci],'branch_color'=>self::OHANG_COLORS[$bci],
+            'text'=>$stem.$branch,'hanja'=>$stemHanja.$branchHanja,
+            'stem_index'=>$pillar[0],'branch_index'=>$pillar[1],
+        ];
+    }
+
+    // ===== 공개 메서드 =====
+    public function getSajuString() {
+        $r = $this->getResult();
+        return "{$r['year_pillar']['text']} {$r['month_pillar']['text']} {$r['day_pillar']['text']} {$r['hour_pillar']['text']}";
+    }
+    public function getDayMaster() { return self::CHEONGAN[$this->dayPillar[0]]; }
+    public function getDayMasterElement() { return self::CHEONGAN_OHANG[$this->getDayMaster()]; }
+    public function getYearPillar() { return $this->yearPillar; }
+    public function getMonthPillar() { return $this->monthPillar; }
+    public function getDayPillar() { return $this->dayPillar; }
+    public function getHourPillar() { return $this->hourPillar; }
+
+    public function getAllElements() {
+        return [
+            'stems'=>[$this->yearPillar[0],$this->monthPillar[0],$this->dayPillar[0],$this->hourPillar[0] ?? $this->dayPillar[0]],
+            'branches'=>[$this->yearPillar[1],$this->monthPillar[1],$this->dayPillar[1],$this->hourPillar[1] ?? $this->dayPillar[1]],
+        ];
+    }
+
+    // ===== 신강/신약 판별 (지장간 포함 정밀 계산) =====
+    public function getDayMasterStrength() {
+        $dayElement = $this->getDayMasterElement();
+        $elements = $this->getAllElements();
+        $support = 0; $oppose = 0;
+
+        // 천간 세력 (일간 자신 제외)
+        foreach ($elements['stems'] as $i => $stemIdx) {
+            if ($i === 2) continue;
+            $el = self::CHEONGAN_OHANG[self::CHEONGAN[$stemIdx]];
+            $rel = $this->getElementRelation($dayElement, $el);
+            if ($rel === 'same' || $rel === 'generate_me') $support += 1.0;
+            else $oppose += 1.0;
+        }
+
+        // 지지 세력 (지장간 비율 반영)
+        foreach ($elements['branches'] as $i => $branchIdx) {
+            $branch = self::JIJI[$branchIdx];
+            foreach (self::JIJANGGAN[$branch] as $item) {
+                $el = self::CHEONGAN_OHANG[$item[0]]; $ratio = $item[1];
+                $weight = ($i === 1) ? $ratio * 1.5 : $ratio; // 월지 가중치
+                $rel = $this->getElementRelation($dayElement, $el);
+                if ($rel === 'same' || $rel === 'generate_me') $support += $weight;
+                else $oppose += $weight;
+            }
+        }
+
+        // 득령(得令) 보너스 - 월지 본기와 일간 오행 비교
+        $monthBranch = self::JIJI[$this->monthPillar[1]];
+        $monthElement = self::JIJI_OHANG[$monthBranch];
+        $deukryeong = ($monthElement === $dayElement);
+        if ($deukryeong) $support += 1.5;
+
+        $total = $support + $oppose;
+        $ratio = ($total > 0) ? $support / $total : 0.5;
+
+        $strength = '중화';
+        if ($ratio >= 0.6) $strength = '매우 신강';
+        elseif ($ratio >= 0.48) $strength = '신강';
+        elseif ($ratio >= 0.38) $strength = '신약';
+        else $strength = '매우 신약';
+
+        return [
+            'support' => round($support, 2),
+            'oppose' => round($oppose, 2),
+            'ratio' => round($ratio, 3),
+            'is_strong' => $ratio >= 0.45,
+            'strength' => $strength,
+            'deukryeong' => $deukryeong,
+            'yongshin' => $this->calculateYongshin($ratio, $dayElement),
+            'description' => $this->getStrengthDescription($ratio, $dayElement),
+        ];
+    }
+
+    /**
+     * 용신(用神) 추정
+     */
+    private function calculateYongshin($ratio, $dayElement) {
+        $cycle = self::OHANG;
+        $idx = array_search($dayElement, $cycle);
+        $insung = $cycle[($idx + 4) % 5];   // 나를 생하는 오행
+        $bigyeop = $dayElement;               // 같은 오행
+        $siksang = $cycle[($idx + 1) % 5];   // 내가 생하는 오행
+        $jaesung = $cycle[($idx + 2) % 5];   // 내가 극하는 오행
+        $gwansung = $cycle[($idx + 3) % 5];  // 나를 극하는 오행
+
+        if ($ratio >= 0.55) {
+            // 신강 → 설기(洩氣)/극제 필요
+            return ['primary'=>$siksang,'secondary'=>$jaesung,'reason'=>'신강하므로 식상(食傷)과 재성(財星)으로 기운을 분산시켜 균형을 맞춥니다.'];
+        } elseif ($ratio >= 0.45) {
+            // 중화 → 현재 상태 유지
+            return ['primary'=>$bigyeop,'secondary'=>$insung,'reason'=>'대체로 균형 잡힌 사주이나 비겁과 인성으로 안정을 유지합니다.'];
+        } else {
+            // 신약 → 부조(扶助) 필요
+            return ['primary'=>$insung,'secondary'=>$bigyeop,'reason'=>'신약하므로 인성(印星)과 비겁(比劫)으로 일간을 도와 균형을 맞춥니다.'];
+        }
+    }
+
+    public function getElementRelation($base, $target) {
+        $cycle = self::OHANG;
+        $baseIdx = array_search($base, $cycle);
+        $targetIdx = array_search($target, $cycle);
+        $diff = ($targetIdx - $baseIdx + 5) % 5;
+        switch ($diff) {
+            case 0: return 'same';
+            case 1: return 'i_generate';
+            case 2: return 'i_control';
+            case 3: return 'control_me';
+            case 4: return 'generate_me';
+        }
+        return 'same';
+    }
+
+    private function getStrengthDescription($ratio, $element) {
+        $desc = [
+            '목' => ['강'=>'큰 나무처럼 강인한 의지와 추진력을 가졌습니다. 주변을 이끄는 리더십이 있으나 고집이 셀 수 있습니다.',
+                     '약'=>'새싹처럼 보살핌이 필요합니다. 수(水)의 도움과 같은 목(木)의 지원이 고르게 성장하는 데 중요합니다.'],
+            '화' => ['강'=>'태양처럼 뜨거운 열정과 에너지를 발산합니다. 표현력이 뛰어나나 감정 조절에 유의하세요.',
+                     '약'=>'촛불처럼 바람에 약합니다. 목(木)이 연료가 되어주고 같은 화(火)의 온기가 필요합니다.'],
+            '토' => ['강'=>'큰 산처럼 묵직하고 안정적인 중심을 잡습니다. 포용력이 크나 변화에 둔할 수 있습니다.',
+                     '약'=>'흙이 흩어지기 쉬운 상태입니다. 화(火)가 토를 만들어주고, 같은 토의 안정이 필요합니다.'],
+            '금' => ['강'=>'강철처럼 날카롭고 정확한 판단력을 지녔습니다. 결단력이 뛰어나나 유연함이 필요합니다.',
+                     '약'=>'금박처럼 외부 충격에 약합니다. 토(土)가 금을 보호하고, 같은 금의 단단함이 필요합니다.'],
+            '수' => ['강'=>'바다처럼 깊은 지혜와 포용력을 가졌습니다. 적응력이 뛰어나나 방향성이 필요합니다.',
+                     '약'=>'이슬처럼 쉽게 증발합니다. 금(金)이 수를 생해주고, 같은 수의 흐름이 필요합니다.'],
+        ];
+        $key = $ratio >= 0.45 ? '강' : '약';
+        return $desc[$element][$key] ?? '';
+    }
+}

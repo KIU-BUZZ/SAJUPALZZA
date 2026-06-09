@@ -1,0 +1,1084 @@
+<?php
+/**
+ * 관리자 - 사주 보고서 생성기 (디자인 개편판)
+ * 
+ * 생년월일시 입력 → 모든 분석 실행 → 종합 보고서 출력/인쇄
+ */
+require_once __DIR__ . '/../includes/admin_check.php';
+require_once SAJU_ENGINE_PATH . '/SajuEngine.php';
+require_once SAJU_ENGINE_PATH . '/OhangAnalysis.php';
+require_once SAJU_ENGINE_PATH . '/FortuneInterpreter.php';
+
+$result = null;
+$errors = [];
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $birthYear   = (int)($_POST['birth_year'] ?? 0);
+    $birthMonth  = (int)($_POST['birth_month'] ?? 0);
+    $birthDay    = (int)($_POST['birth_day'] ?? 0);
+    $birthHour   = (int)($_POST['birth_hour'] ?? -1);
+    $gender      = $_POST['gender'] ?? '';
+    $calendarType = $_POST['calendar_type'] ?? 'solar';
+    $clientName  = trim($_POST['client_name'] ?? '');
+
+    if ($birthYear < 1900 || $birthYear > (int)date('Y')) $errors[] = '올바른 출생 연도를 입력해 주세요.';
+    if ($birthMonth < 1 || $birthMonth > 12) $errors[] = '올바른 출생 월을 선택해 주세요.';
+    if ($birthDay < 1 || $birthDay > 31) $errors[] = '올바른 출생 일을 입력해 주세요.';
+    if ($birthHour < 0 || $birthHour > 23) $errors[] = '올바른 출생 시간을 선택해 주세요.';
+    if (!in_array($gender, ['male','female'])) $errors[] = '성별을 선택해 주세요.';
+
+    if (empty($errors)) {
+        try {
+            $engine = new SajuEngine($birthYear, $birthMonth, $birthDay, $birthHour, $gender, $calendarType);
+            $sajuResult = $engine->getResult();
+            $ohangAnalysis = new OhangAnalysis($engine);
+            $ohangData = $ohangAnalysis->analyze();
+            $interpreter = new FortuneInterpreter($engine);
+            $sipsinData = $interpreter->analyzeSipsin();
+            $gyeokgukData = $interpreter->analyzeGyeokguk();
+            $daeunData = $interpreter->analyzeDaeun();
+            $seunData = $interpreter->analyzeSeun();
+            $fortuneData = $interpreter->getComprehensiveFortune();
+
+            $result = [
+                'client_name' => $clientName ?: '미입력',
+                'saju' => $sajuResult,
+                'ohang' => $ohangData,
+                'sipsin' => $sipsinData,
+                'gyeokguk' => $gyeokgukData,
+                'daeun' => $daeunData,
+                'seun' => $seunData,
+                'fortune' => $fortuneData,
+            ];
+        } catch (Exception $e) {
+            $errors[] = '분석 오류: ' . $e->getMessage();
+        }
+    }
+}
+
+$pageTitle = '사주 보고서 생성 - ' . SITE_NAME;
+?>
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><?= h($pageTitle) ?></title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --sidebar-w: 260px;
+            --accent: #6C5CE7;
+            --accent-light: #A29BFE;
+            --accent-dark: #5A4BD1;
+            --gold: #FDCB6E;
+            --gold-dark: #F0932B;
+            --bg: #F0F2F5;
+            --card-bg: #FFFFFF;
+            --text-primary: #2D3436;
+            --text-secondary: #636E72;
+            --text-muted: #B2BEC3;
+            --border: #E9ECEF;
+            --success: #00B894;
+            --danger: #E17055;
+            --info: #0984E3;
+            --radius: 16px;
+            --shadow-sm: 0 1px 3px rgba(0,0,0,0.04);
+            --shadow-md: 0 4px 20px rgba(0,0,0,0.06);
+            --shadow-lg: 0 8px 40px rgba(0,0,0,0.1);
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: var(--bg); font-family: 'Noto Sans KR', -apple-system, sans-serif; color: var(--text-primary); line-height: 1.6; }
+
+        /* === Sidebar === */
+        .sidebar {
+            width: var(--sidebar-w); position: fixed; top: 0; left: 0; bottom: 0;
+            background: linear-gradient(180deg, #2D3436 0%, #1E272E 100%);
+            z-index: 100; display: flex; flex-direction: column;
+        }
+        .sidebar-brand {
+            padding: 28px 24px 20px; border-bottom: 1px solid rgba(255,255,255,0.06);
+        }
+        .sidebar-brand h2 {
+            color: #fff; font-size: 1.15rem; font-weight: 700;
+            display: flex; align-items: center; gap: 10px;
+        }
+        .sidebar-brand h2 .brand-icon {
+            width: 36px; height: 36px; border-radius: 10px;
+            background: linear-gradient(135deg, var(--accent), var(--accent-light));
+            display: flex; align-items: center; justify-content: center; font-size: 1.1rem;
+        }
+        .sidebar-brand small { color: rgba(255,255,255,0.35); font-size: 0.72rem; display: block; margin-top: 4px; margin-left: 46px; }
+        .sidebar-nav { list-style: none; padding: 12px 12px; flex: 1; }
+        .sidebar-nav li { margin-bottom: 2px; }
+        .sidebar-nav a {
+            display: flex; align-items: center; gap: 12px;
+            padding: 11px 16px; color: rgba(255,255,255,0.55);
+            text-decoration: none; border-radius: 10px; transition: all 0.2s; font-size: 0.88rem;
+        }
+        .sidebar-nav a:hover { background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.85); }
+        .sidebar-nav a.active {
+            background: linear-gradient(135deg, var(--accent), var(--accent-dark));
+            color: #fff; font-weight: 600; box-shadow: 0 4px 12px rgba(108,92,231,0.3);
+        }
+        .sidebar-nav a i { width: 20px; text-align: center; font-size: 0.9rem; }
+        .sidebar-divider { height: 1px; background: rgba(255,255,255,0.06); margin: 12px 16px; }
+        .sidebar-footer { padding: 16px 20px; border-top: 1px solid rgba(255,255,255,0.06); }
+        .sidebar-footer a { color: rgba(255,255,255,0.45); font-size: 0.8rem; text-decoration: none; display: flex; align-items: center; gap: 8px; }
+        .sidebar-footer a:hover { color: rgba(255,255,255,0.75); }
+
+        /* === Main Content === */
+        .main { margin-left: var(--sidebar-w); min-height: 100vh; }
+        .topbar {
+            position: sticky; top: 0; z-index: 50;
+            background: rgba(240,242,245,0.85); backdrop-filter: blur(12px);
+            padding: 16px 32px; display: flex; justify-content: space-between; align-items: center;
+            border-bottom: 1px solid var(--border);
+        }
+        .topbar h1 { font-size: 1.25rem; font-weight: 800; color: var(--text-primary); display: flex; align-items: center; gap: 10px; }
+        .topbar h1 i { color: var(--accent); }
+        .topbar-right { display: flex; align-items: center; gap: 12px; }
+        .topbar-avatar {
+            width: 36px; height: 36px; border-radius: 10px;
+            background: linear-gradient(135deg, var(--accent-light), var(--accent));
+            color: #fff; display: flex; align-items: center; justify-content: center; font-size: 0.85rem; font-weight: 700;
+        }
+        .container { padding: 24px 32px; max-width: 1200px; }
+
+        /* === Form Card === */
+        .form-card {
+            background: var(--card-bg); border-radius: var(--radius); padding: 28px;
+            box-shadow: var(--shadow-md); border: 1px solid var(--border);
+        }
+        .form-card-title {
+            font-size: 1.05rem; font-weight: 700; margin-bottom: 20px;
+            display: flex; align-items: center; gap: 10px; color: var(--text-primary);
+        }
+        .form-card-title i {
+            width: 32px; height: 32px; border-radius: 8px;
+            background: linear-gradient(135deg,var(--accent-light),var(--accent));
+            color: #fff; display: flex; align-items: center; justify-content: center; font-size: 0.85rem;
+        }
+        .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px,1fr)); gap: 16px; }
+        .fg { display: flex; flex-direction: column; }
+        .fg label { font-size: 0.78rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px; }
+        .fg input, .fg select {
+            padding: 10px 14px; border: 1.5px solid var(--border); border-radius: 10px;
+            font-size: 0.9rem; font-family: inherit; background: #FAFBFC; transition: all 0.2s;
+        }
+        .fg input:focus, .fg select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(108,92,231,0.1); background: #fff; }
+        .btn-generate {
+            background: linear-gradient(135deg, var(--accent), var(--accent-dark));
+            color: #fff; border: none; padding: 12px 32px; font-size: 0.95rem;
+            border-radius: 12px; cursor: pointer; font-weight: 700;
+            font-family: inherit; display: inline-flex; align-items: center; gap: 8px;
+            box-shadow: 0 4px 15px rgba(108,92,231,0.3); transition: all 0.2s;
+        }
+        .btn-generate:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(108,92,231,0.4); }
+        .btn-print {
+            background: var(--card-bg); color: var(--text-secondary); border: 1.5px solid var(--border);
+            padding: 10px 20px; font-size: 0.85rem; border-radius: 10px; cursor: pointer;
+            font-weight: 500; font-family: inherit; display: inline-flex; align-items: center; gap: 6px; transition: all 0.2s;
+        }
+        .btn-print:hover { border-color: var(--accent); color: var(--accent); }
+        .btn-pdf {
+            background: linear-gradient(135deg,#E17055,#D63031); color: #fff;
+            border: none; padding: 10px 20px; font-size: 0.85rem; border-radius: 10px;
+            cursor: pointer; font-weight: 500; font-family: inherit; display: inline-flex; align-items: center; gap: 6px;
+        }
+        .error-toast {
+            background: linear-gradient(135deg,#FFEAA7,#FDCB6E); color: #6C5CE7;
+            padding: 12px 18px; border-radius: 12px; margin-bottom: 16px;
+            font-size: 0.88rem; display: flex; align-items: center; gap: 10px;
+            border: 1px solid rgba(253,203,110,0.5);
+        }
+
+        /* === Report === */
+        .report-wrap { margin-top: 24px; }
+
+        .report {
+            background: var(--card-bg); border-radius: var(--radius); overflow: hidden;
+            box-shadow: var(--shadow-lg); border: 1px solid var(--border);
+        }
+
+        /* Report Hero */
+        .report-hero {
+            background: linear-gradient(135deg, #2D3436 0%, #636E72 50%, #2D3436 100%);
+            color: #fff; padding: 48px 40px 40px; position: relative; overflow: hidden;
+        }
+        .report-hero::before {
+            content: ''; position: absolute; top: -60%; right: -20%; width: 400px; height: 400px;
+            background: radial-gradient(circle, rgba(108,92,231,0.2) 0%, transparent 70%);
+            border-radius: 50%;
+        }
+        .report-hero::after {
+            content: ''; position: absolute; bottom: -40%; left: -10%; width: 300px; height: 300px;
+            background: radial-gradient(circle, rgba(253,203,110,0.15) 0%, transparent 70%);
+            border-radius: 50%;
+        }
+        .report-hero-inner { position: relative; z-index: 1; }
+        .report-hero .title-line {
+            display: flex; align-items: center; gap: 16px; margin-bottom: 12px;
+        }
+        .report-hero .title-icon {
+            width: 52px; height: 52px; border-radius: 14px;
+            background: linear-gradient(135deg, var(--accent), var(--gold));
+            display: flex; align-items: center; justify-content: center; font-size: 1.5rem;
+        }
+        .report-hero h2 { font-size: 1.6rem; font-weight: 900; letter-spacing: -0.5px; }
+        .report-hero .subtitle { color: rgba(255,255,255,0.5); font-size: 0.82rem; margin-top: 2px; }
+        .report-meta-grid {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(140px,1fr));
+            gap: 12px; margin-top: 24px;
+        }
+        .report-meta-item {
+            background: rgba(255,255,255,0.08); border-radius: 10px;
+            padding: 12px 16px; backdrop-filter: blur(4px);
+        }
+        .report-meta-item .meta-label { font-size: 0.68rem; color: rgba(255,255,255,0.4); text-transform: uppercase; letter-spacing: 0.5px; }
+        .report-meta-item .meta-value { font-size: 0.92rem; font-weight: 600; margin-top: 4px; }
+
+        /* Report Body */
+        .report-body { padding: 0; }
+
+        /* Section */
+        .rpt-section {
+            padding: 32px 40px; border-bottom: 1px solid var(--border);
+            page-break-inside: avoid;
+        }
+        .rpt-section:last-child { border-bottom: none; }
+        .rpt-section-head {
+            display: flex; align-items: center; gap: 12px; margin-bottom: 20px;
+        }
+        .rpt-section-num {
+            width: 36px; height: 36px; border-radius: 10px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 0.85rem; font-weight: 800; color: #fff; flex-shrink: 0;
+        }
+        .rpt-section-title { font-size: 1.08rem; font-weight: 700; color: var(--text-primary); }
+        .rpt-section-subtitle { font-size: 0.78rem; color: var(--text-muted); margin-top: 2px; }
+        .rpt-desc { font-size: 0.85rem; color: var(--text-secondary); line-height: 1.7; margin-bottom: 16px; }
+
+        /* Pillar Table */
+        .pillar-grid {
+            display: grid; grid-template-columns: 60px repeat(4,1fr);
+            border: 1px solid var(--border); border-radius: 12px; overflow: hidden;
+        }
+        .pillar-grid .pg-head {
+            background: #F8F9FA; font-size: 0.72rem; font-weight: 600;
+            color: var(--text-muted); padding: 10px; text-align: center;
+            text-transform: uppercase; letter-spacing: 0.5px;
+        }
+        .pillar-grid .pg-label {
+            background: #F8F9FA; font-size: 0.78rem; font-weight: 600;
+            color: var(--text-secondary); padding: 10px; display: flex;
+            align-items: center; justify-content: center;
+        }
+        .pillar-grid .pg-cell {
+            padding: 14px 8px; text-align: center;
+            border-top: 1px solid var(--border); border-left: 1px solid var(--border);
+        }
+        .pg-cell .hanja { font-size: 1.5rem; font-weight: 800; line-height: 1; }
+        .pg-cell .Korean { font-size: 0.82rem; color: var(--text-secondary); margin-top: 4px; }
+        .pg-cell .element-tag {
+            display: inline-block; padding: 2px 8px; border-radius: 6px;
+            font-size: 0.68rem; font-weight: 600; margin-top: 4px;
+        }
+        .el-목 { background: #E8F5E9; color: #2E7D32; } .el-화 { background: #FFEBEE; color: #C62828; }
+        .el-토 { background: #FFF8E1; color: #F57F17; } .el-금 { background: #F3E5F5; color: #6A1B9A; }
+        .el-수 { background: #E3F2FD; color: #1565C0; }
+
+        /* Element color for text */
+        .tc-목{color:#2E7D32} .tc-화{color:#C62828} .tc-토{color:#F57F17} .tc-금{color:#6A1B9A} .tc-수{color:#1565C0}
+
+        /* God cards */
+        .god-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; }
+        .god-card {
+            border-radius: 12px; padding: 16px; text-align: center;
+            border: 1px solid var(--border); position: relative; overflow: hidden;
+        }
+        .god-card::before {
+            content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+        }
+        .god-card .god-label { font-size: 0.72rem; font-weight: 700; margin-bottom: 4px; }
+        .god-card .god-element { font-size: 1.4rem; font-weight: 900; margin: 6px 0; }
+        .god-card .god-type { font-size: 0.7rem; opacity: 0.7; }
+
+        /* Bar chart */
+        .bar-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+        .bar-label { min-width: 45px; font-size: 0.8rem; font-weight: 600; text-align: right; }
+        .bar-track { flex: 1; height: 24px; background: #F0F2F5; border-radius: 8px; overflow: hidden; position: relative; }
+        .bar-fill {
+            height: 100%; border-radius: 8px; display: flex; align-items: center;
+            padding-left: 10px; font-size: 0.72rem; font-weight: 700; color: #fff;
+            transition: width 0.6s ease;
+        }
+        .bar-value { min-width: 40px; font-size: 0.78rem; font-weight: 600; text-align: left; color: var(--text-secondary); }
+
+        /* Daeun Timeline */
+        .daeun-flow { display: flex; gap: 0; overflow-x: auto; padding-bottom: 8px; }
+        .daeun-node {
+            min-width: 110px; text-align: center; padding: 16px 12px; position: relative;
+            border-radius: 12px; border: 1px solid var(--border); margin-right: 8px; flex-shrink: 0;
+            background: var(--card-bg); transition: all 0.2s;
+        }
+        .daeun-node.yongshin {
+            border-color: var(--gold-dark); background: linear-gradient(135deg,#FFF9E6,#FFF3CD);
+        }
+        .daeun-node .dn-age { font-size: 0.7rem; color: var(--text-muted); font-weight: 600; }
+        .daeun-node .dn-pillar { font-size: 1.2rem; font-weight: 800; margin: 6px 0 2px; }
+        .daeun-node .dn-sipsin { font-size: 0.72rem; color: var(--text-secondary); }
+        .daeun-node .dn-score {
+            display: inline-block; margin-top: 6px; padding: 2px 10px; border-radius: 20px;
+            font-size: 0.72rem; font-weight: 700; color: #fff;
+        }
+
+        /* Seun Card */
+        .seun-row {
+            display: grid; grid-template-columns: 80px 1fr 60px; gap: 16px;
+            align-items: center; padding: 16px 0; border-bottom: 1px solid var(--border);
+        }
+        .seun-row:last-child { border-bottom: none; }
+        .seun-year { font-size: 1.2rem; font-weight: 800; text-align: center; }
+        .seun-year small { display: block; font-size: 0.72rem; font-weight: 400; color: var(--text-muted); }
+        .seun-body { font-size: 0.85rem; line-height: 1.7; color: var(--text-secondary); }
+        .seun-score { font-size: 1.1rem; font-weight: 800; text-align: center; }
+
+        /* Fortune Section */
+        .fortune-grid { display: grid; grid-template-columns: 1fr; gap: 0; }
+        .fortune-item {
+            padding: 20px 0; border-bottom: 1px solid var(--border);
+        }
+        .fortune-item:last-child { border-bottom: none; }
+        .fortune-item-head {
+            display: flex; align-items: center; gap: 10px; margin-bottom: 10px;
+        }
+        .fortune-item-icon {
+            width: 32px; height: 32px; border-radius: 8px; display: flex;
+            align-items: center; justify-content: center; font-size: 0.85rem; color: #fff; flex-shrink: 0;
+        }
+        .fortune-item-title { font-size: 0.95rem; font-weight: 700; }
+        .fortune-item-text { font-size: 0.88rem; color: var(--text-secondary); line-height: 1.85; white-space: pre-line; }
+
+        /* Relationship tags */
+        .rel-tag {
+            display: inline-flex; align-items: center; padding: 3px 10px;
+            border-radius: 6px; font-size: 0.72rem; font-weight: 700; margin-right: 4px;
+        }
+
+        /* Sipsin rule card */
+        .sipsin-card {
+            border-radius: 12px; padding: 16px 18px; margin-bottom: 10px;
+            border-left: 4px solid var(--accent); background: #FAFBFC;
+        }
+        .sipsin-card .sc-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+        .sipsin-card .sc-level {
+            font-size: 0.68rem; font-weight: 700; padding: 2px 8px; border-radius: 4px; color: #fff;
+        }
+        .sipsin-card .sc-title { font-weight: 700; font-size: 0.88rem; }
+        .sipsin-card .sc-text { font-size: 0.82rem; color: var(--text-secondary); line-height: 1.7; white-space: pre-line; }
+
+        /* Info block */
+        .info-block {
+            background: #F8F9FA; border-radius: 12px; padding: 16px 20px;
+            font-size: 0.88rem; line-height: 1.8; color: var(--text-secondary); white-space: pre-line;
+            margin-top: 12px;
+        }
+
+        /* Report Footer */
+        .report-footer {
+            text-align: center; padding: 24px 40px; background: #F8F9FA;
+            border-top: 1px solid var(--border);
+        }
+        .report-footer p { font-size: 0.78rem; color: var(--text-muted); }
+
+        /* Jijanggan compact */
+        .jjg-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 10px; }
+        .jjg-item { background: #FAFBFC; border-radius: 10px; padding: 12px; text-align: center; border: 1px solid var(--border); }
+        .jjg-item .jjg-label { font-size: 0.7rem; color: var(--text-muted); font-weight: 600; margin-bottom: 6px; }
+
+        /* Score pill */
+        .score-pill { display: inline-block; padding: 3px 12px; border-radius: 20px; font-size: 0.75rem; font-weight: 700; }
+        .sp-high { background: #E8F5E9; color: #2E7D32; }
+        .sp-mid { background: #E3F2FD; color: #1565C0; }
+        .sp-low { background: #FFF3E0; color: #E65100; }
+        .sp-danger { background: #FFEBEE; color: #C62828; }
+
+        /* Supplement block */
+        .sup-card {
+            border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px;
+            margin-bottom: 8px; background: #FAFBFC;
+        }
+        .sup-card .sup-head { font-weight: 700; font-size: 0.88rem; margin-bottom: 6px; display: flex; align-items: center; gap: 6px; }
+        .sup-card ul { list-style: none; padding: 0; margin: 0; }
+        .sup-card li { font-size: 0.82rem; color: var(--text-secondary); padding: 3px 0; padding-left: 16px; position: relative; }
+        .sup-card li::before { content: '✦'; position: absolute; left: 0; color: var(--accent); }
+
+        /* Print */
+        @media print {
+            body { background: #fff !important; }
+            .sidebar, .topbar, .no-print { display: none !important; }
+            .main { margin-left: 0 !important; }
+            .container { padding: 0 !important; max-width: 100% !important; }
+            .report { box-shadow: none !important; border: none !important; }
+            .rpt-section { page-break-inside: avoid; }
+            .report-hero { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        }
+        @media (max-width: 768px) {
+            .sidebar { width: 60px; }
+            .sidebar-brand h2 span, .sidebar-brand small, .sidebar-nav a span { display: none; }
+            .sidebar-nav a { justify-content: center; padding: 12px; }
+            .sidebar-footer { display: none; }
+            .main { margin-left: 60px; }
+            .container { padding: 16px; }
+            .rpt-section { padding: 20px; }
+            .report-hero { padding: 24px 20px; }
+            .god-grid { grid-template-columns: 1fr 1fr; }
+            .form-grid { grid-template-columns: 1fr; }
+            .pillar-grid .pg-cell .hanja { font-size: 1.1rem; }
+            .report-meta-grid { grid-template-columns: 1fr 1fr; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- ========== Sidebar ========== -->
+<aside class="sidebar no-print">
+    <div class="sidebar-brand">
+        <h2>
+            <span class="brand-icon">☯</span>
+            <span><?= SITE_NAME ?></span>
+        </h2>
+        <small>Admin Console</small>
+    </div>
+    <nav>
+        <ul class="sidebar-nav">
+            <li><a href="<?= SITE_URL ?>/admin/index.php"><i class="fas fa-chart-pie"></i><span>대시보드</span></a></li>
+            <li><a href="<?= SITE_URL ?>/admin/users.php"><i class="fas fa-users"></i><span>회원 관리</span></a></li>
+            <li><a href="<?= SITE_URL ?>/admin/history.php"><i class="fas fa-scroll"></i><span>분석 기록</span></a></li>
+            <li><a href="<?= SITE_URL ?>/admin/tickets.php"><i class="fas fa-ticket-alt"></i><span>티켓 관리</span></a></li>
+            <li><a href="<?= SITE_URL ?>/admin/report.php" class="active"><i class="fas fa-file-alt"></i><span>보고서 생성</span></a></li>
+        </ul>
+        <div class="sidebar-divider"></div>
+    </nav>
+    <div class="sidebar-footer">
+        <a href="<?= SITE_URL ?>/pages/home.php"><i class="fas fa-arrow-left"></i> 사이트로 돌아가기</a>
+    </div>
+</aside>
+
+<!-- ========== Main ========== -->
+<div class="main">
+    <div class="topbar no-print">
+        <h1><i class="fas fa-file-alt"></i> 보고서 생성</h1>
+        <div class="topbar-right">
+            <span style="font-size:0.82rem;color:var(--text-muted);"><?= h(getCurrentUser()['nickname']) ?></span>
+            <div class="topbar-avatar"><?= mb_substr(getCurrentUser()['nickname'], 0, 1) ?></div>
+        </div>
+    </div>
+
+    <div class="container">
+
+        <!-- ====== Input Form ====== -->
+        <div class="form-card no-print">
+            <div class="form-card-title">
+                <i class="fas fa-user-edit"></i>
+                생년월일시 입력
+            </div>
+
+            <?php if (!empty($errors)): ?>
+                <?php foreach ($errors as $e): ?>
+                    <div class="error-toast"><i class="fas fa-exclamation-circle"></i> <?= h($e) ?></div>
+                <?php endforeach; ?>
+            <?php endif; ?>
+
+            <form method="POST">
+                <div class="form-grid">
+                    <div class="fg">
+                        <label>의뢰인 이름</label>
+                        <input type="text" name="client_name" placeholder="홍길동" value="<?= h($_POST['client_name'] ?? '') ?>">
+                    </div>
+                    <div class="fg">
+                        <label>출생 연도 *</label>
+                        <input type="number" name="birth_year" min="1900" max="<?= date('Y') ?>" placeholder="1990" value="<?= h($_POST['birth_year'] ?? '') ?>" required>
+                    </div>
+                    <div class="fg">
+                        <label>출생 월 *</label>
+                        <select name="birth_month" required>
+                            <option value="">선택</option>
+                            <?php for ($m = 1; $m <= 12; $m++): ?>
+                            <option value="<?= $m ?>" <?= (($_POST['birth_month'] ?? '') == $m) ? 'selected' : '' ?>><?= $m ?>월</option>
+                            <?php endfor; ?>
+                        </select>
+                    </div>
+                    <div class="fg">
+                        <label>출생 일 *</label>
+                        <input type="number" name="birth_day" min="1" max="31" placeholder="15" value="<?= h($_POST['birth_day'] ?? '') ?>" required>
+                    </div>
+                    <div class="fg">
+                        <label>출생 시 *</label>
+                        <select name="birth_hour" required>
+                            <option value="">선택</option>
+                            <?php
+                            $times = ['자시 23:30~','','축시 01:30~','','인시 03:30~','','묘시 05:30~','','진시 07:30~','','사시 09:30~','','오시 11:30~','','미시 13:30~','','신시 15:30~','','유시 17:30~','','술시 19:30~','','해시 21:30~',''];
+                            for ($h = 0; $h <= 23; $h++):
+                            ?>
+                            <option value="<?= $h ?>" <?= (($_POST['birth_hour'] ?? '') === (string)$h) ? 'selected' : '' ?>><?= $h ?>시<?= $times[$h] ? " ({$times[$h]})" : '' ?></option>
+                            <?php endfor; ?>
+                        </select>
+                    </div>
+                    <div class="fg">
+                        <label>성별 *</label>
+                        <select name="gender" required>
+                            <option value="">선택</option>
+                            <option value="male" <?= (($_POST['gender'] ?? '') === 'male') ? 'selected' : '' ?>>남성</option>
+                            <option value="female" <?= (($_POST['gender'] ?? '') === 'female') ? 'selected' : '' ?>>여성</option>
+                        </select>
+                    </div>
+                    <div class="fg">
+                        <label>달력 유형</label>
+                        <select name="calendar_type">
+                            <option value="solar" <?= (($_POST['calendar_type'] ?? 'solar') === 'solar') ? 'selected' : '' ?>>양력</option>
+                            <option value="lunar" <?= (($_POST['calendar_type'] ?? '') === 'lunar') ? 'selected' : '' ?>>음력</option>
+                        </select>
+                    </div>
+                </div>
+                <div style="text-align:center;margin-top:20px;">
+                    <button type="submit" class="btn-generate"><i class="fas fa-scroll"></i> 보고서 생성</button>
+                </div>
+            </form>
+        </div>
+
+        <?php if ($result): ?>
+        <?php
+            $saju = $result['saju'];
+            $ohang = $result['ohang'];
+            $sipsin = $result['sipsin'];
+            $gyeokguk = $result['gyeokguk'];
+            $daeun = $result['daeun'];
+            $seun = $result['seun'];
+            $fortune = $result['fortune'];
+            $pillars = [
+                'year' => $saju['year_pillar'],
+                'month' => $saju['month_pillar'],
+                'day' => $saju['day_pillar'],
+                'hour' => $saju['hour_pillar'],
+            ];
+            $genderStr = $saju['input']['gender'] === 'male' ? '남' : '여';
+            $dms = $saju['day_master_strength'];
+            $ohangColors = ['목'=>'#2E7D32','화'=>'#C62828','토'=>'#F57F17','금'=>'#6A1B9A','수'=>'#1565C0'];
+            $sectionColors = ['#6C5CE7','#00B894','#0984E3','#E17055','#FDCB6E','#A29BFE','#FF7675','#74B9FF','#55EFC4','#E84393'];
+
+            $normGod = function($g) {
+                if (is_array($g) && isset($g['element'])) return $g;
+                if (is_array($g) && isset($g['primary'])) return ['element'=>$g['primary'],'type'=>''];
+                return ['element'=>(string)$g,'type'=>''];
+            };
+        ?>
+
+        <!-- Action Bar -->
+        <div style="display:flex;justify-content:flex-end;gap:10px;margin:20px 0;" class="no-print">
+            <button class="btn-print" onclick="window.print()"><i class="fas fa-print"></i> 인쇄</button>
+        </div>
+
+        <div class="report" id="reportArea">
+
+            <!-- ===== Hero Header ===== -->
+            <div class="report-hero">
+                <div class="report-hero-inner">
+                    <div class="title-line">
+                        <div class="title-icon">📜</div>
+                        <div>
+                            <h2>사주팔자 종합 보고서</h2>
+                            <div class="subtitle"><?= SITE_NAME ?> · <?= date('Y년 n월 j일') ?> 생성</div>
+                        </div>
+                    </div>
+                    <div class="report-meta-grid">
+                        <div class="report-meta-item">
+                            <div class="meta-label">의뢰인</div>
+                            <div class="meta-value"><?= h($result['client_name']) ?></div>
+                        </div>
+                        <div class="report-meta-item">
+                            <div class="meta-label">생년월일시</div>
+                            <div class="meta-value"><?= $saju['input']['year'] ?>.<?= $saju['input']['month'] ?>.<?= $saju['input']['day'] ?> <?= $saju['input']['hour'] ?>시</div>
+                        </div>
+                        <div class="report-meta-item">
+                            <div class="meta-label">성별</div>
+                            <div class="meta-value"><?= $genderStr ?>성</div>
+                        </div>
+                        <div class="report-meta-item">
+                            <div class="meta-label">달력</div>
+                            <div class="meta-value"><?= $saju['input']['calendar_type'] === 'solar' ? '양력' : '음력' ?></div>
+                        </div>
+                        <div class="report-meta-item">
+                            <div class="meta-label">일간(日干)</div>
+                            <div class="meta-value" style="font-size:1.1rem;"><?= $saju['day_master'] ?>(<?= $saju['day_master_element'] ?>)</div>
+                        </div>
+                        <div class="report-meta-item">
+                            <div class="meta-label">띠 / 시명</div>
+                            <div class="meta-value"><?= $saju['zodiac'] ?? '' ?> · <?= $saju['siji_name'] ?? '' ?></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="report-body">
+
+                <!-- ===== 1. 사주명식 ===== -->
+                <div class="rpt-section">
+                    <div class="rpt-section-head">
+                        <div class="rpt-section-num" style="background:<?= $sectionColors[0] ?>;">1</div>
+                        <div>
+                            <div class="rpt-section-title">사주명식 (四柱命式)</div>
+                            <div class="rpt-section-subtitle">태어난 순간의 우주 에너지 배치도</div>
+                        </div>
+                    </div>
+                    <div class="pillar-grid">
+                        <div class="pg-head"></div>
+                        <div class="pg-head">시주(時柱)</div>
+                        <div class="pg-head">일주(日柱)</div>
+                        <div class="pg-head">월주(月柱)</div>
+                        <div class="pg-head">년주(年柱)</div>
+                        <div class="pg-label">천간</div>
+                        <?php foreach (['hour','day','month','year'] as $p): ?>
+                        <div class="pg-cell">
+                            <div class="hanja tc-<?= $pillars[$p]['stem_element'] ?>"><?= $pillars[$p]['stem_hanja'] ?></div>
+                            <div class="Korean"><?= $pillars[$p]['stem'] ?></div>
+                            <span class="element-tag el-<?= $pillars[$p]['stem_element'] ?>"><?= $pillars[$p]['stem_element'] ?></span>
+                        </div>
+                        <?php endforeach; ?>
+                        <div class="pg-label">지지</div>
+                        <?php foreach (['hour','day','month','year'] as $p): ?>
+                        <div class="pg-cell">
+                            <div class="hanja tc-<?= $pillars[$p]['branch_element'] ?>"><?= $pillars[$p]['branch_hanja'] ?></div>
+                            <div class="Korean"><?= $pillars[$p]['branch'] ?></div>
+                            <span class="element-tag el-<?= $pillars[$p]['branch_element'] ?>"><?= $pillars[$p]['branch_element'] ?></span>
+                        </div>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+
+                <!-- ===== 2. 지장간 ===== -->
+                <?php if (!empty($saju['jijanggan'])): ?>
+                <div class="rpt-section">
+                    <div class="rpt-section-head">
+                        <div class="rpt-section-num" style="background:<?= $sectionColors[1] ?>;">2</div>
+                        <div>
+                            <div class="rpt-section-title">지장간 (地藏干)</div>
+                            <div class="rpt-section-subtitle">지지 속에 숨겨진 내면의 에너지</div>
+                        </div>
+                    </div>
+                    <div class="jjg-grid">
+                    <?php
+                    $pillarNames = ['year'=>'년주','month'=>'월주','day'=>'일주','hour'=>'시주'];
+                    foreach (['hour','day','month','year'] as $p):
+                        $jjg = $saju['jijanggan'][$p] ?? [];
+                    ?>
+                        <div class="jjg-item">
+                            <div class="jjg-label"><?= $pillarNames[$p] ?> · <?= $pillars[$p]['branch'] ?>(<?= $pillars[$p]['branch_hanja'] ?>)</div>
+                            <?php foreach ($jjg as $item): ?>
+                            <div style="margin:3px 0;">
+                                <span class="element-tag el-<?= $item['element'] ?>"><?= $item['element'] ?></span>
+                                <span style="font-size:0.82rem;font-weight:600;"><?= $item['gan'] ?? '' ?></span>
+                            </div>
+                            <?php endforeach; ?>
+                        </div>
+                    <?php endforeach; ?>
+                    </div>
+                </div>
+                <?php endif; ?>
+
+                <!-- ===== 3. 신강/신약 + 4신 ===== -->
+                <div class="rpt-section">
+                    <div class="rpt-section-head">
+                        <div class="rpt-section-num" style="background:<?= $sectionColors[2] ?>;">3</div>
+                        <div>
+                            <div class="rpt-section-title">신강/신약 및 사신(四神) 분석</div>
+                            <div class="rpt-section-subtitle">일간의 세기와 용신·희신·기신·구신</div>
+                        </div>
+                    </div>
+                    <?php
+                    $strengthLabel = $dms['is_strong'] ? '신강(身强)' : '신약(身弱)';
+                    $strengthEmoji = $dms['is_strong'] ? '💪' : '🍃';
+                    $yong = $normGod($dms['yongshin'] ?? []);
+                    $hee = $normGod($dms['heeshin'] ?? []);
+                    $gi = $normGod($dms['gishin'] ?? []);
+                    $gu = $normGod($dms['gushin'] ?? []);
+                    ?>
+                    <div style="text-align:center;margin-bottom:20px;">
+                        <span style="font-size:2rem;"><?= $strengthEmoji ?></span>
+                        <div style="font-size:1.3rem;font-weight:900;margin-top:4px;"><?= $strengthLabel ?></div>
+                        <div style="font-size:0.82rem;color:var(--text-muted);">점수: <?= $dms['score'] ?? '-' ?></div>
+                    </div>
+
+                    <div class="god-grid">
+                        <?php
+                        $gods = [
+                            ['data'=>$yong,'label'=>'용신(用神)','desc'=>'가장 필요한 기운','color'=>'#00B894','bg'=>'#E8F5E9'],
+                            ['data'=>$hee,'label'=>'희신(喜神)','desc'=>'용신을 돕는 기운','color'=>'#0984E3','bg'=>'#E3F2FD'],
+                            ['data'=>$gi,'label'=>'기신(忌神)','desc'=>'피해야 할 기운','color'=>'#E17055','bg'=>'#FFF3E0'],
+                            ['data'=>$gu,'label'=>'구신(仇神)','desc'=>'기신을 돕는 기운','color'=>'#D63031','bg'=>'#FFEBEE'],
+                        ];
+                        foreach ($gods as $g): ?>
+                        <div class="god-card" style="background:<?= $g['bg'] ?>;">
+                            <div style="position:absolute;top:0;left:0;right:0;height:3px;background:<?= $g['color'] ?>;"></div>
+                            <div class="god-label" style="color:<?= $g['color'] ?>;"><?= $g['label'] ?></div>
+                            <div class="god-element"><?= $g['data']['element'] ?></div>
+                            <div class="god-type"><?= $g['data']['type'] ?></div>
+                        </div>
+                        <?php endforeach; ?>
+                    </div>
+
+                    <?php if (!empty($dms['four_gods_explanation'])): ?>
+                    <div class="info-block" style="margin-top:16px;">
+                        <?= nl2br(h($dms['four_gods_explanation'])) ?>
+                    </div>
+                    <?php endif; ?>
+                </div>
+
+                <!-- ===== 4. 합충형파해 ===== -->
+                <?php if (!empty($saju['relationships'])): ?>
+                <div class="rpt-section">
+                    <div class="rpt-section-head">
+                        <div class="rpt-section-num" style="background:<?= $sectionColors[3] ?>;">4</div>
+                        <div>
+                            <div class="rpt-section-title">합충형파해 (合沖刑破害)</div>
+                            <div class="rpt-section-subtitle">사주 글자들 사이의 관계 분석</div>
+                        </div>
+                    </div>
+                    <?php
+                    $relStyles = [
+                        '육합'=>['bg'=>'#E8F5E9','color'=>'#2E7D32'],
+                        '삼합'=>['bg'=>'#C8E6C9','color'=>'#1B5E20'],
+                        '방합'=>['bg'=>'#A5D6A7','color'=>'#1B5E20'],
+                        '충'=>['bg'=>'#FFEBEE','color'=>'#C62828'],
+                        '형'=>['bg'=>'#FFF3E0','color'=>'#E65100'],
+                        '해'=>['bg'=>'#FCE4EC','color'=>'#AD1457'],
+                        '파'=>['bg'=>'#FFF8E1','color'=>'#F57F17'],
+                        '천간합'=>['bg'=>'#E3F2FD','color'=>'#1565C0'],
+                        '천간충'=>['bg'=>'#F3E5F5','color'=>'#7B1FA2'],
+                    ];
+                    foreach ($saju['relationships'] as $rel):
+                        $rs = $relStyles[$rel['type']] ?? ['bg'=>'#F5F5F5','color'=>'#333'];
+                    ?>
+                    <div style="padding:12px 0;border-bottom:1px solid var(--border);">
+                        <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;">
+                            <span class="rel-tag" style="background:<?= $rs['bg'] ?>;color:<?= $rs['color'] ?>;"><?= $rel['type'] ?></span>
+                            <span style="font-weight:700;font-size:0.9rem;"><?= h($rel['chars']) ?></span>
+                        </div>
+                        <div style="font-size:0.82rem;color:var(--text-secondary);line-height:1.6;padding-left:80px;"><?= nl2br(h($rel['meaning'])) ?></div>
+                    </div>
+                    <?php endforeach; ?>
+                </div>
+                <?php endif; ?>
+
+                <!-- ===== 5. 오행 ===== -->
+                <div class="rpt-section">
+                    <div class="rpt-section-head">
+                        <div class="rpt-section-num" style="background:<?= $sectionColors[4] ?>;">5</div>
+                        <div>
+                            <div class="rpt-section-title">오행(五行) 분석</div>
+                            <div class="rpt-section-subtitle">목·화·토·금·수 다섯 가지 기운의 분포</div>
+                        </div>
+                    </div>
+                    <?php
+                    $weighted = $ohang['weighted_ohang_count'] ?? $ohang['ohang_count'] ?? [];
+                    $maxEl = max(array_values($weighted) ?: [1]);
+                    foreach (['목','화','토','금','수'] as $el):
+                        $val = $weighted[$el] ?? 0;
+                        $pct = $maxEl > 0 ? round($val / $maxEl * 100) : 0;
+                    ?>
+                    <div class="bar-row">
+                        <div class="bar-label"><span class="element-tag el-<?= $el ?>"><?= $el ?></span></div>
+                        <div class="bar-track">
+                            <div class="bar-fill" style="width:<?= $pct ?>%;background:<?= $ohangColors[$el] ?>;"><?= number_format($val, 1) ?></div>
+                        </div>
+                        <div class="bar-value"><?= $pct ?>%</div>
+                    </div>
+                    <?php endforeach; ?>
+
+                    <?php if (!empty($ohang['balance'])): ?>
+                    <div class="info-block" style="margin-top:16px;">
+                        <strong>오행 균형 평가</strong><br>
+                        <?= nl2br(h($ohang['balance']['description'] ?? '')) ?>
+                        <?php if (!empty($ohang['balance']['missing'])): ?><br>부족 오행: <?= implode(', ', $ohang['balance']['missing']) ?><?php endif; ?>
+                        <?php if (!empty($ohang['balance']['balance_level'])): ?><br>균형도: <?= h($ohang['balance']['balance_level']) ?> (<?= $ohang['balance']['balance_score'] ?? '' ?>점)<?php endif; ?>
+                    </div>
+                    <?php endif; ?>
+
+                    <?php if (!empty($ohang['supplement']) && is_array($ohang['supplement'])): ?>
+                    <div style="margin-top:16px;">
+                        <div style="font-weight:700;font-size:0.9rem;margin-bottom:10px;">💡 오행 보완 가이드</div>
+                        <?php foreach ($ohang['supplement'] as $sup): ?>
+                        <div class="sup-card">
+                            <div class="sup-head">
+                                <span class="element-tag el-<?= h($sup['element'] ?? '') ?>"><?= h($sup['element'] ?? '') ?></span>
+                                <?= h($sup['type'] ?? '') ?> — 방향: <?= h($sup['direction'] ?? '') ?>, 계절: <?= h($sup['season'] ?? '') ?>
+                            </div>
+                            <?php if (!empty($sup['methods'])): ?>
+                            <ul>
+                                <?php foreach ($sup['methods'] as $m): ?><li><?= h($m) ?></li><?php endforeach; ?>
+                            </ul>
+                            <?php endif; ?>
+                        </div>
+                        <?php endforeach; ?>
+                    </div>
+                    <?php endif; ?>
+                </div>
+
+                <!-- ===== 6. 십성 ===== -->
+                <div class="rpt-section">
+                    <div class="rpt-section-head">
+                        <div class="rpt-section-num" style="background:<?= $sectionColors[5] ?>;">6</div>
+                        <div>
+                            <div class="rpt-section-title">십성(十星) 분석</div>
+                            <div class="rpt-section-subtitle">일간과 다른 글자들의 관계 — 재능·직업·성격·인연</div>
+                        </div>
+                    </div>
+                    <?php
+                    $sipsinDist = $sipsin['distribution'] ?? [];
+                    arsort($sipsinDist);
+                    $maxSipsin = max(array_values($sipsinDist) ?: [1]);
+                    ?>
+
+                    <div style="margin-bottom:20px;">
+                        <div style="font-weight:700;font-size:0.88rem;margin-bottom:10px;">십성 분포</div>
+                        <?php foreach ($sipsinDist as $sName => $sVal):
+                            if ($sVal <= 0) continue;
+                            $sPct = round(($sVal / $maxSipsin) * 100);
+                        ?>
+                        <div class="bar-row">
+                            <div class="bar-label" style="min-width:50px;"><?= $sName ?></div>
+                            <div class="bar-track">
+                                <div class="bar-fill" style="width:<?= $sPct ?>%;background:var(--accent);"><?= number_format($sVal, 1) ?></div>
+                            </div>
+                        </div>
+                        <?php endforeach; ?>
+                    </div>
+
+                    <?php if (!empty($sipsin['group_totals'])): ?>
+                    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:20px;">
+                        <?php
+                        $gColors = ['비겁(比劫)'=>'#6C5CE7','식상(食傷)'=>'#FDCB6E','재성(財星)'=>'#00B894','관성(官星)'=>'#0984E3','인성(印星)'=>'#E17055'];
+                        foreach ($sipsin['group_totals'] as $gn => $gv): $gc = $gColors[$gn] ?? '#666'; ?>
+                        <div style="text-align:center;padding:10px;background:#FAFBFC;border-radius:10px;border-top:3px solid <?= $gc ?>;">
+                            <div style="font-size:0.68rem;color:var(--text-muted);"><?= $gn ?></div>
+                            <div style="font-size:1.1rem;font-weight:800;color:<?= $gc ?>;margin-top:4px;"><?= number_format($gv, 1) ?></div>
+                        </div>
+                        <?php endforeach; ?>
+                    </div>
+                    <?php endif; ?>
+
+                    <?php if (!empty($sipsin['interpretations'])): ?>
+                    <div style="font-weight:700;font-size:0.88rem;margin-bottom:10px;">📖 십성 조합 해석</div>
+                    <?php
+                    $levelColorMap = ['길'=>'#00B894','대길'=>'#00B894','주의'=>'#E17055','경고'=>'#D63031','갈등'=>'#6C5CE7','양면'=>'#0984E3','참고'=>'#636E72','종합'=>'#2D3436'];
+                    foreach ($sipsin['interpretations'] as $rule): ?>
+                    <div class="sipsin-card" style="border-left-color:<?= $levelColorMap[$rule['level']] ?? '#636E72' ?>;">
+                        <div class="sc-head">
+                            <span class="sc-level" style="background:<?= $levelColorMap[$rule['level']] ?? '#636E72' ?>;"><?= $rule['level'] ?></span>
+                            <span style="font-size:0.72rem;color:var(--text-muted);"><?= $rule['category'] ?></span>
+                        </div>
+                        <div class="sc-title"><?= h($rule['title']) ?></div>
+                        <div class="sc-text"><?= nl2br(h($rule['text'])) ?></div>
+                    </div>
+                    <?php endforeach; ?>
+                    <?php endif; ?>
+                </div>
+
+                <!-- ===== 7. 격국 ===== -->
+                <div class="rpt-section">
+                    <div class="rpt-section-head">
+                        <div class="rpt-section-num" style="background:<?= $sectionColors[6] ?>;">7</div>
+                        <div>
+                            <div class="rpt-section-title">격국(格局) 분석</div>
+                            <div class="rpt-section-subtitle">사주의 핵심 구조와 인생 테마</div>
+                        </div>
+                    </div>
+                    <div style="text-align:center;padding:24px 0;">
+                        <div style="font-size:2rem;font-weight:900;color:var(--accent);"><?= h($gyeokguk['name']) ?></div>
+                        <div style="font-size:0.88rem;color:var(--text-secondary);margin-top:6px;"><?= h($gyeokguk['description']) ?></div>
+                        <?php if (!empty($gyeokguk['quality'])): ?>
+                        <span class="score-pill sp-high" style="margin-top:10px;display:inline-block;"><?= h($gyeokguk['quality']['level']) ?></span>
+                        <?php endif; ?>
+                    </div>
+                    <div class="info-block" style="border-left:4px solid var(--accent);">
+                        <?= nl2br(h($gyeokguk['detail'])) ?>
+                    </div>
+                    <?php if (!empty($gyeokguk['quality']['description'])): ?>
+                    <div style="margin-top:12px;font-size:0.85rem;color:var(--text-secondary);">
+                        <strong>격국 품질:</strong> <?= h($gyeokguk['quality']['description']) ?>
+                    </div>
+                    <?php endif; ?>
+                </div>
+
+                <!-- ===== 8. 대운 ===== -->
+                <div class="rpt-section">
+                    <div class="rpt-section-head">
+                        <div class="rpt-section-num" style="background:<?= $sectionColors[7] ?>;">8</div>
+                        <div>
+                            <div class="rpt-section-title">대운(大運) 분석</div>
+                            <div class="rpt-section-subtitle">10년 단위 인생 흐름 · 방향: <?= $daeun['direction'] ?> · 시작 <?= $daeun['start_age'] ?>세</div>
+                        </div>
+                    </div>
+
+                    <!-- Timeline Flow -->
+                    <div class="daeun-flow" style="margin-bottom:20px;">
+                    <?php foreach ($daeun['daeuns'] as $d):
+                        $sc = $d['score'];
+                        $scBg = $sc >= 70 ? '#00B894' : ($sc >= 50 ? '#0984E3' : ($sc >= 35 ? '#E17055' : '#D63031'));
+                    ?>
+                        <div class="daeun-node<?= $d['is_yongshin'] ? ' yongshin' : '' ?>">
+                            <div class="dn-age"><?= $d['age_start'] ?>~<?= $d['age_end'] ?>세</div>
+                            <div class="dn-pillar"><?= $d['stem_hanja'] ?><?= $d['branch_hanja'] ?></div>
+                            <div style="font-size:0.78rem;color:var(--text-muted);"><?= $d['stem'] ?><?= $d['branch'] ?></div>
+                            <div class="dn-sipsin">
+                                <span class="element-tag el-<?= $d['stem_element'] ?>" style="font-size:0.65rem;"><?= $d['stem_sipsin'] ?></span>
+                                <span class="element-tag el-<?= $d['branch_element'] ?>" style="font-size:0.65rem;"><?= $d['branch_sipsin'] ?></span>
+                            </div>
+                            <span class="dn-score" style="background:<?= $scBg ?>;"><?= $sc ?>점</span>
+                            <?php if ($d['is_yongshin']): ?><div style="font-size:0.68rem;color:#F0932B;margin-top:4px;">⭐ 용신</div><?php endif; ?>
+                        </div>
+                    <?php endforeach; ?>
+                    </div>
+
+                    <!-- Detailed Interpretation -->
+                    <?php foreach ($daeun['daeuns'] as $d): ?>
+                    <details style="margin-bottom:6px;border:1px solid var(--border);border-radius:10px;overflow:hidden;">
+                        <summary style="padding:12px 16px;font-size:0.85rem;font-weight:600;cursor:pointer;background:#FAFBFC;display:flex;align-items:center;gap:10px;">
+                            <span><?= $d['age_start'] ?>~<?= $d['age_end'] ?>세</span>
+                            <span style="font-size:0.82rem;color:var(--text-muted);"><?= $d['stem'] ?><?= $d['branch'] ?></span>
+                            <?php
+                            $scCls = $d['score'] >= 70 ? 'sp-high' : ($d['score'] >= 50 ? 'sp-mid' : ($d['score'] >= 35 ? 'sp-low' : 'sp-danger'));
+                            ?>
+                            <span class="score-pill <?= $scCls ?>" style="margin-left:auto;"><?= $d['score'] ?>점</span>
+                            <?php if ($d['is_yongshin']): ?><span style="color:#F0932B;font-size:0.8rem;">⭐</span><?php endif; ?>
+                        </summary>
+                        <div style="padding:12px 16px;font-size:0.85rem;color:var(--text-secondary);line-height:1.7;white-space:pre-line;">
+                            <?= h($d['interpretation']) ?>
+                        </div>
+                    </details>
+                    <?php endforeach; ?>
+
+                    <!-- 원국 패턴 & 30년 대운 흐름 (v4 패턴 엔진) -->
+                    <?php if (!empty($daeun['wonguk_patterns'])): ?>
+                    <div style="margin-top:16px;padding:16px;background:linear-gradient(135deg,#F8F9FA,#EDF2F7);border-radius:12px;border:1px solid var(--border);">
+                        <div style="font-weight:700;font-size:0.9rem;margin-bottom:10px;">🔮 원국(原局) 핵심 패턴</div>
+                        <div style="display:flex;flex-wrap:wrap;gap:8px;">
+                        <?php foreach ($daeun['wonguk_patterns'] as $pat): ?>
+                            <span style="display:inline-block;padding:4px 12px;border-radius:20px;font-size:0.78rem;font-weight:600;background:linear-gradient(135deg,#6C5CE7,#A29BFE);color:#fff;"><?= h($pat) ?></span>
+                        <?php endforeach; ?>
+                        </div>
+                    </div>
+                    <?php endif; ?>
+
+                    <?php if (!empty($daeun['thirty_year_flow'])): ?>
+                    <div style="margin-top:16px;padding:16px;background:linear-gradient(135deg,#FFF9E6,#FEF3CD);border-radius:12px;border:1px solid #F0D78C;">
+                        <div style="font-weight:700;font-size:0.9rem;margin-bottom:10px;">📊 30년 대운 흐름 분석</div>
+                        <?php
+                            $flow = $daeun['thirty_year_flow'];
+                            if (!empty($flow['period_label'])):
+                        ?>
+                        <div style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:8px;">
+                            <strong>분석 기간:</strong> <?= h($flow['period_label']) ?>
+                        </div>
+                        <?php endif; ?>
+                        <?php if (!empty($flow['overall_trend'])): ?>
+                        <div style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:8px;">
+                            <strong>전체 흐름:</strong> <?= h($flow['overall_trend']) ?>
+                        </div>
+                        <?php endif; ?>
+                        <?php if (!empty($flow['narrative'])): ?>
+                        <div style="font-size:0.85rem;color:var(--text-secondary);line-height:1.7;white-space:pre-line;margin-top:8px;">
+                            <?= h($flow['narrative']) ?>
+                        </div>
+                        <?php endif; ?>
+                    </div>
+                    <?php endif; ?>
+                </div>
+
+                <!-- ===== 9. 세운 ===== -->
+                <div class="rpt-section">
+                    <div class="rpt-section-head">
+                        <div class="rpt-section-num" style="background:<?= $sectionColors[8] ?>;">9</div>
+                        <div>
+                            <div class="rpt-section-title">세운(歲運) 분석</div>
+                            <div class="rpt-section-subtitle">향후 5년 연 단위 운세</div>
+                        </div>
+                    </div>
+                    <?php foreach ($seun as $s): ?>
+                    <div class="seun-row">
+                        <div class="seun-year">
+                            <?= $s['year'] ?>
+                            <small><?= $s['stem'] ?><?= $s['branch'] ?></small>
+                        </div>
+                        <div class="seun-body">
+                            <div style="display:flex;gap:6px;margin-bottom:6px;">
+                                <span class="element-tag el-<?= $s['stem_element'] ?>" style="font-size:0.68rem;"><?= $s['stem_sipsin'] ?></span>
+                                <span class="element-tag el-<?= $s['branch_element'] ?>" style="font-size:0.68rem;"><?= $s['branch_sipsin'] ?></span>
+                                <span style="font-size:0.72rem;color:var(--text-muted);"><?= $s['zodiac'] ?>띠</span>
+                                <?php if ($s['is_yongshin']): ?><span style="font-size:0.72rem;color:#F0932B;">⭐ 용신</span><?php endif; ?>
+                            </div>
+                            <div style="font-size:0.82rem;line-height:1.6;white-space:pre-line;"><?= h($s['interpretation']) ?></div>
+                            <?php if (!empty($s['monthly_highlight'])): ?>
+                            <div style="margin-top:6px;font-size:0.75rem;color:var(--text-muted);">
+                                📅 Best: <?= $s['monthly_highlight']['best_month'] ?>월 · Worst: <?= $s['monthly_highlight']['worst_month'] ?>월
+                            </div>
+                            <?php endif; ?>
+                        </div>
+                        <div class="seun-score" style="color:<?= $s['score'] >= 70 ? '#00B894' : ($s['score'] >= 50 ? '#0984E3' : ($s['score'] >= 35 ? '#E17055' : '#D63031')) ?>;">
+                            <?= $s['score'] ?>
+                        </div>
+                    </div>
+                    <?php endforeach; ?>
+                </div>
+
+                <!-- ===== 10. 종합 운세 ===== -->
+                <div class="rpt-section">
+                    <div class="rpt-section-head">
+                        <div class="rpt-section-num" style="background:<?= $sectionColors[9] ?>;">10</div>
+                        <div>
+                            <div class="rpt-section-title">종합 운세 분석</div>
+                            <div class="rpt-section-subtitle">사주의 모든 요소를 종합한 7가지 인생 영역</div>
+                        </div>
+                    </div>
+                    <div class="fortune-grid">
+                    <?php
+                    $fSections = [
+                        ['key'=>'personality','icon'=>'fa-brain','title'=>'성격·기질','color'=>'#6C5CE7'],
+                        ['key'=>'love','icon'=>'fa-heart','title'=>'연애·결혼','color'=>'#E84393'],
+                        ['key'=>'career','icon'=>'fa-briefcase','title'=>'직업·적성','color'=>'#0984E3'],
+                        ['key'=>'wealth','icon'=>'fa-coins','title'=>'재물운','color'=>'#FDCB6E'],
+                        ['key'=>'study','icon'=>'fa-graduation-cap','title'=>'학업·시험','color'=>'#00B894'],
+                        ['key'=>'health','icon'=>'fa-heartbeat','title'=>'건강','color'=>'#E17055'],
+                        ['key'=>'life_flow','icon'=>'fa-river','title'=>'인생 흐름','color'=>'#636E72'],
+                    ];
+                    foreach ($fSections as $sec):
+                        $content = $fortune[$sec['key']] ?? '';
+                        if (empty($content)) continue;
+                    ?>
+                    <div class="fortune-item">
+                        <div class="fortune-item-head">
+                            <div class="fortune-item-icon" style="background:<?= $sec['color'] ?>;"><i class="fas <?= $sec['icon'] ?>"></i></div>
+                            <div class="fortune-item-title"><?= $sec['title'] ?></div>
+                        </div>
+                        <div class="fortune-item-text"><?= nl2br(h($content)) ?></div>
+                    </div>
+                    <?php endforeach; ?>
+                    </div>
+                </div>
+
+            </div><!-- /report-body -->
+
+            <div class="report-footer">
+                <p><?= SITE_NAME ?> · 사주팔자 종합 보고서 · <?= date('Y년 n월 j일 H:i') ?> 생성</p>
+                <p style="margin-top:4px;">본 보고서는 명리학적 해석을 기반으로 하며, 참고 자료로 활용하시기 바랍니다.</p>
+            </div>
+        </div><!-- /report -->
+
+        <?php endif; ?>
+    </div><!-- /container -->
+</div><!-- /main -->
+
+</body>
+</html>

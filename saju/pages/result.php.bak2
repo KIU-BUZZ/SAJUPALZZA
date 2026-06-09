@@ -1,0 +1,475 @@
+<?php
+/**
+ * 사주 분석 결과 페이지
+ * 저장된 분석 결과를 그대로 출력 (다시 계산하지 않음)
+ */
+require_once __DIR__ . '/../includes/auth_check.php';
+require_once __DIR__ . '/../saju/SajuEngine.php';
+require_once __DIR__ . '/../saju/OhangAnalysis.php';
+
+$user = getCurrentUser();
+$recordId = (int)($_GET['id'] ?? 0);
+
+if ($recordId <= 0) {
+    setFlashMessage('error', '잘못된 요청입니다.');
+    redirect('/pages/history.php');
+}
+
+// DB에서 기록 조회
+$pdo = getDBConnection();
+$stmt = $pdo->prepare("SELECT * FROM saju_fortune_history WHERE id = ? AND user_id = ?");
+$stmt->execute([$recordId, $user['id']]);
+$record = $stmt->fetch();
+
+if (!$record) {
+    setFlashMessage('error', '분석 기록을 찾을 수 없습니다.');
+    redirect('/pages/history.php');
+}
+
+// 저장된 결과 파싱
+$fullResult = json_decode($record['fortune_result'], true);
+$sajuResult = $fullResult['saju'] ?? null;
+$ohangData = $fullResult['ohang'] ?? null;
+$sipsinData = $fullResult['sipsin'] ?? null;
+$gyeokgukData = $fullResult['gyeokguk'] ?? null;
+$daeunData = $fullResult['daeun'] ?? null;
+$seunData = $fullResult['seun'] ?? null;
+$fortuneData = $fullResult['fortune'] ?? null;
+
+// 오행 클래스 매핑
+function getElementClass($element) {
+    $map = ['목' => 'wood', '화' => 'fire', '토' => 'earth', '금' => 'metal', '수' => 'water'];
+    return $map[$element] ?? '';
+}
+
+$pageTitle = '분석 결과 - ' . SITE_NAME;
+include INCLUDES_PATH . '/header.php';
+?>
+
+<div class="animate-fade">
+    <!-- 기본 정보 -->
+    <div class="card">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <div>
+                <div style="font-size: 0.78rem; color: var(--text-muted);">분석 날짜: <?= formatDate($record['created_at'], 'Y.m.d H:i') ?></div>
+                <h2 style="font-size: 1.15rem; font-weight: 800; margin-top: 4px;">사주팔자 분석 결과</h2>
+            </div>
+            <span class="card-badge <?= in_array($record['analysis_type'], ['basic', 'ohang']) ? 'free' : 'premium' ?>">
+                <?= in_array($record['analysis_type'], ['basic', 'ohang']) ? '무료' : '프리미엄' ?>
+            </span>
+        </div>
+        
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 0.82rem; color: var(--text-secondary);">
+            <div><i class="fas fa-calendar" style="width: 18px; color: var(--text-muted);"></i> <?= $record['birth_year'] ?>년 <?= $record['birth_month'] ?>월 <?= $record['birth_day'] ?>일</div>
+            <div><i class="fas fa-clock" style="width: 18px; color: var(--text-muted);"></i> <?= $sajuResult['siji_name'] ?? '' ?></div>
+            <div><i class="fas fa-<?= $record['gender'] === 'male' ? 'mars' : 'venus' ?>" style="width: 18px; color: var(--text-muted);"></i> <?= $record['gender'] === 'male' ? '남성' : '여성' ?></div>
+            <div><i class="fas fa-<?= $record['calendar_type'] === 'solar' ? 'sun' : 'moon' ?>" style="width: 18px; color: var(--text-muted);"></i> <?= $record['calendar_type'] === 'solar' ? '양력' : '음력' ?></div>
+        </div>
+    </div>
+    
+    <?php if ($sajuResult): ?>
+    <!-- 사주명식 (4주 차트) -->
+    <div class="card">
+        <div class="card-header">
+            <span class="card-title">사주명식 (四柱命式)</span>
+            <span style="font-size: 0.8rem; color: var(--text-muted);">나의 오행: <strong style="color: var(--text-primary);"><?= $sajuResult['day_master_element'] ?>(<?= $sajuResult['day_master'] ?>)</strong></span>
+        </div>
+        
+        <div style="text-align: center; margin-bottom: 8px; font-size: 0.78rem; color: var(--text-muted);">
+            띠: <?= $sajuResult['zodiac'] ?? '' ?>띠
+            <?php if (!empty($sajuResult['day_master_strength']['strength'])): ?>
+             · <?= h($sajuResult['day_master_strength']['strength']) ?>
+            <?php endif; ?>
+            <?php if (!empty($sajuResult['gongmang'])): ?>
+             · 공망: <?= implode('', $sajuResult['gongmang']) ?>
+            <?php endif; ?>
+        </div>
+        
+        <!-- 사주 차트 -->
+        <div class="saju-chart">
+            <?php
+            $pillars = [
+                ['label' => '시주', 'data' => $sajuResult['hour_pillar']],
+                ['label' => '일주', 'data' => $sajuResult['day_pillar']],
+                ['label' => '월주', 'data' => $sajuResult['month_pillar']],
+                ['label' => '년주', 'data' => $sajuResult['year_pillar']],
+            ];
+            
+            foreach ($pillars as $pillar):
+                $stemClass = getElementClass($pillar['data']['stem_element']);
+                $branchClass = getElementClass($pillar['data']['branch_element']);
+            ?>
+            <div class="pillar-column">
+                <div class="pillar-label"><?= $pillar['label'] ?></div>
+                
+                <?php if ($sipsinData): ?>
+                    <?php 
+                    $pillarIdx = array_search($pillar['label'], array_column($sipsinData['pillars'], 'pillar_name'));
+                    $ss = $sipsinData['pillars'][$pillarIdx] ?? null;
+                    ?>
+                    <div class="pillar-sipsin"><?= $ss ? $ss['stem_sipsin'] : '' ?></div>
+                <?php else: ?>
+                    <div class="pillar-sipsin"><?= $pillar['data']['stem_element'] ?>(<?= $pillar['data']['stem_element_hanja'] ?>)</div>
+                <?php endif; ?>
+                
+                <!-- 천간 -->
+                <div class="pillar-cell <?= $stemClass ?>">
+                    <span class="element-tag <?= $stemClass ?>"><?= $pillar['data']['stem_yinyang'] ?>,<?= $pillar['data']['stem_element_hanja'] ?></span>
+                    <span class="pillar-hanja"><?= $pillar['data']['stem_hanja'] ?></span>
+                    <span class="pillar-korean"><?= $pillar['data']['stem'] ?></span>
+                </div>
+                
+                <?php if ($sipsinData): ?>
+                    <div class="pillar-sipsin"><?= $ss ? $ss['branch_sipsin'] : '' ?></div>
+                <?php else: ?>
+                    <div class="pillar-sipsin"><?= $pillar['data']['branch_element'] ?>(<?= $pillar['data']['branch_element_hanja'] ?>)</div>
+                <?php endif; ?>
+                
+                <!-- 지지 -->
+                <div class="pillar-cell <?= $branchClass ?>">
+                    <span class="element-tag <?= $branchClass ?>"><?= $pillar['data']['branch_yinyang'] ?>,<?= $pillar['data']['branch_element_hanja'] ?></span>
+                    <span class="pillar-hanja"><?= $pillar['data']['branch_hanja'] ?></span>
+                    <span class="pillar-korean"><?= $pillar['data']['branch'] ?></span>
+                </div>
+                
+                <?php if ($sipsinData && $ss): ?>
+                <div class="pillar-twelve"><?= $ss['twelve_stage'] ?></div>
+                <?php endif; ?>
+            </div>
+            <?php endforeach; ?>
+        </div>
+    </div>
+    
+    <?php if (!empty($sajuResult['jijanggan'])): ?>
+    <!-- 지장간 분석 -->
+    <div class="card">
+        <div class="card-header">
+            <span class="card-title">지장간 (地藏干)</span>
+            <span style="font-size: 0.78rem; color: var(--text-muted);">지지에 암장된 천간</span>
+        </div>
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;">
+        <?php 
+        $jjgLabels = ['hour'=>'시주','day'=>'일주','month'=>'월주','year'=>'년주'];
+        foreach (['hour','day','month','year'] as $pk):
+            $jjg = $sajuResult['jijanggan'][$pk] ?? [];
+        ?>
+            <div style="text-align:center; padding:8px; background: var(--bg-secondary); border-radius: 8px;">
+                <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:4px;"><?= $jjgLabels[$pk] ?></div>
+                <?php if (empty($jjg)): ?>
+                    <div style="font-size:0.82rem; color:var(--text-muted);">-</div>
+                <?php else: ?>
+                    <?php foreach ($jjg as $item): ?>
+                    <div style="font-size:0.82rem; margin:2px 0;">
+                        <span class="element-tag <?= getElementClass($item['element']) ?>" style="font-size:0.7rem; padding:1px 6px;"><?= $item['element_hanja'] ?></span>
+                        <?= $item['gan'] ?>(<?= $item['hanja'] ?>) <span style="color:var(--text-muted); font-size:0.72rem;"><?= $item['label'] ?> <?= round($item['ratio']*100) ?>%</span>
+                    </div>
+                    <?php endforeach; ?>
+                <?php endif; ?>
+            </div>
+        <?php endforeach; ?>
+        </div>
+    </div>
+    <?php endif; ?>
+
+    <?php if (!empty($sajuResult['day_master_strength'])): ?>
+    <!-- 신강/신약 분석 -->
+    <div class="card">
+        <div class="card-header">
+            <span class="card-title">일간 강약 분석</span>
+            <span style="font-size: 0.85rem; font-weight: 700;"><?= h($sajuResult['day_master_strength']['strength']) ?></span>
+        </div>
+        <?php $dms = $sajuResult['day_master_strength']; ?>
+        <div style="display: flex; gap: 10px; margin-bottom: 12px;">
+            <div style="flex:1; background:#E8F5E9; padding:10px; border-radius:8px; text-align:center;">
+                <div style="font-size:0.72rem; color:#2E7D32;">아군(扶助)</div>
+                <div style="font-size:1.1rem; font-weight:800; color:#2E7D32;"><?= $dms['support'] ?></div>
+            </div>
+            <div style="flex:1; background:#FFEBEE; padding:10px; border-radius:8px; text-align:center;">
+                <div style="font-size:0.72rem; color:#C62828;">적군(克洩)</div>
+                <div style="font-size:1.1rem; font-weight:800; color:#C62828;"><?= $dms['oppose'] ?></div>
+            </div>
+            <div style="flex:1; background:#E3F2FD; padding:10px; border-radius:8px; text-align:center;">
+                <div style="font-size:0.72rem; color:#1565C0;">비율</div>
+                <div style="font-size:1.1rem; font-weight:800; color:#1565C0;"><?= round($dms['ratio']*100) ?>%</div>
+            </div>
+        </div>
+        <?php if ($dms['deukryeong']): ?>
+        <div style="font-size:0.82rem; color:#2E7D32; margin-bottom:8px;">✅ 득령(得令) — 월지의 기운이 일간을 돕습니다.</div>
+        <?php else: ?>
+        <div style="font-size:0.82rem; color:#F57C00; margin-bottom:8px;">⚠️ 실령(失令) — 월지의 기운이 일간을 돕지 못합니다.</div>
+        <?php endif; ?>
+        <div style="font-size:0.85rem; color:var(--text-secondary); line-height:1.6;"><?= h($dms['description'] ?? '') ?></div>
+        <?php if (!empty($dms['yongshin'])): ?>
+        <div style="margin-top:10px; padding:10px 14px; background:var(--primary-light); border-radius:8px; font-size:0.83rem;">
+            <strong>용신(用神):</strong> <?= h($dms['yongshin']['primary']) ?>(<?= OhangAnalysis::OHANG_PROPERTIES[$dms['yongshin']['primary']]['hanja'] ?? '' ?>)
+            · <?= h($dms['yongshin']['reason']) ?>
+        </div>
+        <?php endif; ?>
+    </div>
+    <?php endif; ?>
+
+    <?php if (!empty($sajuResult['relationships'])): ?>
+    <!-- 합충형파해 관계 -->
+    <div class="card">
+        <div class="card-header">
+            <span class="card-title">합충형파해 관계</span>
+            <span style="font-size:0.78rem; color:var(--text-muted);"><?= count($sajuResult['relationships']) ?>개 발견</span>
+        </div>
+        <?php foreach ($sajuResult['relationships'] as $rel): ?>
+        <div style="padding:8px 0; border-bottom:1px solid var(--border-light); font-size:0.83rem;">
+            <span style="display:inline-block; padding:2px 8px; border-radius:4px; font-size:0.75rem; font-weight:700; 
+                <?php
+                $relColors = ['육합'=>'background:#E8F5E9;color:#2E7D32;','삼합'=>'background:#E8F5E9;color:#1B5E20;','방합'=>'background:#C8E6C9;color:#1B5E20;',
+                    '충'=>'background:#FFEBEE;color:#C62828;','형'=>'background:#FFF3E0;color:#E65100;','해'=>'background:#FFEBEE;color:#B71C1C;',
+                    '파'=>'background:#FFF8E1;color:#F57F17;','천간합'=>'background:#E3F2FD;color:#1565C0;','천간충'=>'background:#FCE4EC;color:#AD1457;'];
+                echo $relColors[$rel['type']] ?? 'background:#F5F5F5;color:#333;';
+                ?>"><?= $rel['type'] ?></span>
+            <span style="margin-left:6px; font-weight:600;"><?= h($rel['chars']) ?></span>
+            <span style="color:var(--text-muted); font-size:0.75rem; margin-left:4px;">(<?= h($rel['position']) ?>)</span>
+            <div style="margin-top:4px; color:var(--text-secondary); font-size:0.8rem; line-height:1.5;"><?= h($rel['meaning']) ?></div>
+        </div>
+        <?php endforeach; ?>
+    </div>
+    <?php endif; ?>
+
+    <?php endif; ?>
+    
+    <?php if ($ohangData): ?>
+    <!-- 오행 분석 -->
+    <div class="card">
+        <div class="card-header">
+            <span class="card-title">오행 분석 (五行)</span>
+            <span style="font-size: 0.82rem; font-weight: 600;">균형도: <?= $ohangData['weighted_balance'] ?? $ohangData['balance'] ?>점</span>
+        </div>
+        
+        <div class="ohang-bars">
+            <?php
+            $maxCount = max(array_values($ohangData['ohang_count']));
+            $total = $ohangData['total'];
+            $ohangNames = ['목' => '목(木)', '화' => '화(火)', '토' => '토(土)', '금' => '금(金)', '수' => '수(水)'];
+            
+            foreach ($ohangData['ohang_count'] as $element => $count):
+                $pct = $total > 0 ? ($count / $total * 100) : 0;
+                $class = getElementClass($element);
+            ?>
+            <div class="ohang-bar-row">
+                <span class="ohang-bar-label"><?= $ohangNames[$element] ?></span>
+                <div class="ohang-bar-track">
+                    <div class="ohang-bar-fill <?= $class ?>" data-width="<?= $pct ?>" style="width: 0%;">
+                        <?= $count ?>개
+                    </div>
+                </div>
+                <span class="ohang-bar-count"><?= round($pct) ?>%</span>
+            </div>
+            <?php endforeach; ?>
+        </div>
+        
+        <div style="margin-top: 12px; font-size: 0.85rem; color: var(--text-secondary); line-height: 1.7;">
+            <p><?= h($ohangData['balance_description']) ?></p>
+        </div>
+        
+        <?php if (!empty($ohangData['interpretation'])): ?>
+        <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border-light);">
+            <?php if (isset($ohangData['interpretation']['day_master'])): ?>
+            <div class="fortune-content" style="margin-bottom: 12px;">
+                <?= h($ohangData['interpretation']['day_master']) ?>
+            </div>
+            <?php endif; ?>
+            
+            <?php if (isset($ohangData['interpretation']['advice'])): ?>
+            <div style="background: var(--primary-light); padding: 12px 16px; border-radius: 10px; font-size: 0.85rem; color: var(--text-primary);">
+                <i class="fas fa-lightbulb" style="color: var(--primary-dark);"></i> 
+                <?= h($ohangData['interpretation']['advice']) ?>
+            </div>
+            <?php endif; ?>
+        </div>
+        <?php endif; ?>
+    </div>
+    <?php endif; ?>
+    
+    <?php if ($sipsinData): ?>
+    <!-- 십신 분석 -->
+    <div class="fortune-section">
+        <div class="fortune-section-title">
+            <i class="fas fa-yin-yang"></i> 십신 분석
+        </div>
+        
+        <div style="margin-bottom: 16px;">
+            <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 8px;">주요 십신</div>
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <span style="font-size: 1.3rem; font-weight: 800; color: var(--primary-dark);"><?= h($sipsinData['dominant_sipsin']) ?></span>
+                <span style="font-size: 0.82rem; color: var(--text-secondary);"><?= h($sipsinData['dominant_sipsin_info']['desc'] ?? '') ?></span>
+            </div>
+        </div>
+        
+        <div class="fortune-content">
+            <?= h($sipsinData['interpretation']) ?>
+        </div>
+    </div>
+    <?php endif; ?>
+    
+    <?php if ($gyeokgukData): ?>
+    <!-- 격국 분석 -->
+    <div class="fortune-section">
+        <div class="fortune-section-title">
+            <i class="fas fa-chess-queen"></i> 격국 분석
+        </div>
+        
+        <div style="display: flex; gap: 12px; margin-bottom: 16px;">
+            <div style="background: var(--primary-light); padding: 12px 20px; border-radius: 10px; text-align: center; flex: 1;">
+                <div style="font-size: 0.75rem; color: var(--text-muted);">격국 유형</div>
+                <div style="font-size: 1rem; font-weight: 800; margin-top: 4px;"><?= h($gyeokgukData['type_name']) ?></div>
+            </div>
+            <div style="background: #E3F2FD; padding: 12px 20px; border-radius: 10px; text-align: center; flex: 1;">
+                <div style="font-size: 0.75rem; color: var(--text-muted);">용신 (用神)</div>
+                <div style="font-size: 1rem; font-weight: 800; margin-top: 4px;"><?= h($gyeokgukData['yongsin']['element']) ?></div>
+            </div>
+        </div>
+        
+        <div class="fortune-content">
+            <?= h($gyeokgukData['interpretation']) ?>
+        </div>
+        
+        <?php if ($gyeokgukData['yongsin']['description']): ?>
+        <div style="margin-top: 12px; padding: 12px 16px; background: #FFF3E0; border-radius: 10px; font-size: 0.85rem;">
+            <strong>용신:</strong> <?= h($gyeokgukData['yongsin']['description']) ?>
+        </div>
+        <?php endif; ?>
+    </div>
+    <?php endif; ?>
+    
+    <?php if ($daeunData): ?>
+    <!-- 대운 분석 -->
+    <div class="fortune-section">
+        <div class="fortune-section-title">
+            <i class="fas fa-road"></i> 대운 분석 (大運)
+        </div>
+        
+        <div style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 12px;">
+            대운 방향: <strong><?= h($daeunData['direction']) ?></strong> · 시작 나이: <?= $daeunData['start_age'] ?>세
+        </div>
+        
+        <div class="daeun-timeline">
+            <?php foreach ($daeunData['daeun_list'] as $daeun): ?>
+            <div class="daeun-item <?= $daeun['score'] >= 80 ? 'highlight' : '' ?>">
+                <div class="daeun-age"><?= $daeun['age_start'] ?>~<?= $daeun['age_end'] ?>세</div>
+                <div class="daeun-pillar"><?= $daeun['stem_hanja'] ?><?= $daeun['branch_hanja'] ?></div>
+                <div style="font-size: 0.7rem; color: var(--text-muted);"><?= $daeun['stem'] ?><?= $daeun['branch'] ?></div>
+                <div class="daeun-score"><?= $daeun['score'] ?>점</div>
+            </div>
+            <?php endforeach; ?>
+        </div>
+        
+        <?php if ($daeunData['summary']): ?>
+        <div class="fortune-content" style="margin-top: 16px;">
+            <?= h($daeunData['summary']) ?>
+        </div>
+        <?php endif; ?>
+    </div>
+    <?php endif; ?>
+    
+    <?php if ($seunData): ?>
+    <!-- 세운 분석 -->
+    <div class="fortune-section">
+        <div class="fortune-section-title">
+            <i class="fas fa-calendar-alt"></i> <?= $seunData['year'] ?>년 세운 분석
+        </div>
+        
+        <div class="score-container" style="padding: 16px 0;">
+            <div class="score-circle" style="width: 100px; height: 100px;">
+                <span class="score-number" style="font-size: 2rem;"><?= $seunData['total_score'] ?></span>
+            </div>
+            <p style="font-size: 0.85rem; color: var(--text-secondary); margin-top: 8px;">
+                <?= $seunData['year'] ?>년 <?= $seunData['zodiac'] ?>의 해 · <?= $seunData['stem'] ?><?= $seunData['branch'] ?>(<?= $seunData['stem_hanja'] ?><?= $seunData['branch_hanja'] ?>)
+            </p>
+        </div>
+        
+        <!-- 레이더 차트 -->
+        <div class="radar-chart-container">
+            <canvas id="seunRadar"></canvas>
+        </div>
+        
+        <!-- 월별 운세 -->
+        <div style="margin-top: 16px;">
+            <h4 style="font-size: 0.9rem; font-weight: 700; margin-bottom: 10px;">월별 운세</h4>
+            <div class="monthly-chart">
+                <?php foreach ($seunData['monthly'] as $monthly): ?>
+                <div class="monthly-item">
+                    <div class="monthly-month"><?= $monthly['month'] ?>월</div>
+                    <div class="monthly-score <?= $monthly['score'] >= 70 ? 'high' : ($monthly['score'] >= 50 ? 'mid' : 'low') ?>">
+                        <?= $monthly['score'] ?>
+                    </div>
+                </div>
+                <?php endforeach; ?>
+            </div>
+        </div>
+        
+        <div class="fortune-content" style="margin-top: 12px;">
+            <?= h($seunData['interpretation']) ?>
+        </div>
+    </div>
+    <?php endif; ?>
+    
+    <?php if ($fortuneData): ?>
+    <!-- 종합 운세 해석 -->
+    <?php
+    $fortuneSections = [
+        'personality' => ['icon' => 'fa-brain', 'color' => '#9C27B0'],
+        'love' => ['icon' => 'fa-heart', 'color' => '#E91E63'],
+        'career' => ['icon' => 'fa-briefcase', 'color' => '#2196F3'],
+        'wealth' => ['icon' => 'fa-coins', 'color' => '#FF9800'],
+        'study' => ['icon' => 'fa-graduation-cap', 'color' => '#4CAF50'],
+        'life_flow' => ['icon' => 'fa-river', 'color' => '#607D8B'],
+    ];
+    
+    foreach ($fortuneSections as $key => $meta):
+        if (isset($fortuneData[$key])):
+    ?>
+    <div class="fortune-section">
+        <div class="fortune-section-title">
+            <i class="fas <?= $meta['icon'] ?>" style="color: <?= $meta['color'] ?>;"></i>
+            <?= h($fortuneData[$key]['title']) ?>
+        </div>
+        <div class="fortune-content"><?= h($fortuneData[$key]['content']) ?></div>
+    </div>
+    <?php 
+        endif;
+    endforeach; 
+    ?>
+    <?php endif; ?>
+    
+    <!-- 하단 액션 -->
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 16px;">
+        <a href="<?= SITE_URL ?>/pages/analyze.php" class="btn btn-primary btn-block">
+            <i class="fas fa-redo"></i> 새로 분석
+        </a>
+        <a href="<?= SITE_URL ?>/pages/history.php" class="btn btn-outline btn-block">
+            <i class="fas fa-clock-rotate-left"></i> 기록 보기
+        </a>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // 오행 바 애니메이션
+    animateOhangBars();
+    
+    <?php if ($seunData): ?>
+    // 세운 레이더 차트
+    createRadarChart('seunRadar', {
+        labels: [
+            <?php foreach ($seunData['categories'] as $cat): ?>
+            '<?= $cat['name'] ?>',
+            <?php endforeach; ?>
+        ],
+        values: [
+            <?php foreach ($seunData['categories'] as $cat): ?>
+            <?= $cat['score'] ?>,
+            <?php endforeach; ?>
+        ]
+    });
+    <?php endif; ?>
+});
+</script>
+
+<?php include INCLUDES_PATH . '/footer.php'; ?>

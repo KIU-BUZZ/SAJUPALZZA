@@ -1,0 +1,531 @@
+<?php
+/**
+ * 오행(五行) 정밀 분석 클래스
+ * 
+ * 지장간(地藏干) 비율 반영 가중치 계산
+ * 계절 강약 분석 (득령/실령)
+ * 상생/상극 흐름 분석
+ * 용신(用神) 연계
+ * 체용(體用) 분석
+ */
+
+require_once __DIR__ . '/SajuEngine.php';
+
+class OhangAnalysis {
+
+    private $engine;
+    private $ohangCount;          // 기본 카운트
+    private $weightedOhangCount;  // 지장간 가중치 반영
+
+    // 오행 상생 관계
+    const OHANG_GENERATE = [
+        '목' => '화', '화' => '토', '토' => '금', '금' => '수', '수' => '목'
+    ];
+    // 오행 상극 관계
+    const OHANG_CONTROL = [
+        '목' => '토', '화' => '금', '토' => '수', '금' => '목', '수' => '화'
+    ];
+
+    // 오행별 속성 정보
+    const OHANG_PROPERTIES = [
+        '목' => [
+            'hanja'=>'木','nature'=>'나무','season'=>'봄','direction'=>'동',
+            'color'=>'파랑/초록','character'=>'성장, 인자, 자비',
+            'organ'=>'간/담','taste'=>'신맛','emotion'=>'분노',
+            'number'=>'3,8','planet'=>'목성','animal'=>'호랑이/토끼',
+        ],
+        '화' => [
+            'hanja'=>'火','nature'=>'불','season'=>'여름','direction'=>'남',
+            'color'=>'빨강','character'=>'예의, 열정, 표현',
+            'organ'=>'심장/소장','taste'=>'쓴맛','emotion'=>'기쁨',
+            'number'=>'2,7','planet'=>'화성','animal'=>'뱀/말',
+        ],
+        '토' => [
+            'hanja'=>'土','nature'=>'흙','season'=>'환절기(사계)','direction'=>'중앙',
+            'color'=>'노랑/갈색','character'=>'신의, 안정, 포용',
+            'organ'=>'비장/위장','taste'=>'단맛','emotion'=>'사려/걱정',
+            'number'=>'5,10','planet'=>'토성','animal'=>'소/용/양/개',
+        ],
+        '금' => [
+            'hanja'=>'金','nature'=>'쇠','season'=>'가을','direction'=>'서',
+            'color'=>'흰색/금색','character'=>'의리, 결단, 추진력',
+            'organ'=>'폐/대장','taste'=>'매운맛','emotion'=>'슬픔',
+            'number'=>'4,9','planet'=>'금성','animal'=>'원숭이/닭',
+        ],
+        '수' => [
+            'hanja'=>'水','nature'=>'물','season'=>'겨울','direction'=>'북',
+            'color'=>'검정/남색','character'=>'지혜, 적응, 유연',
+            'organ'=>'신장/방광','taste'=>'짠맛','emotion'=>'공포/두려움',
+            'number'=>'1,6','planet'=>'수성','animal'=>'쥐/돼지',
+        ],
+    ];
+
+    // 오행 상생 순서
+    const OHANG_CYCLE = ['목', '화', '토', '금', '수'];
+
+    // 계절 왕상휴수사(旺相休囚死)
+    // 각 계절(월지 본기 기준)에서 오행의 힘
+    // 왕=1.5, 상=1.2, 휴=1.0, 수=0.7, 사=0.5
+    const SEASONAL_STRENGTH = [
+        '목' => ['목'=>1.5,'화'=>1.2,'토'=>0.5,'금'=>0.7,'수'=>1.0],
+        '화' => ['목'=>1.0,'화'=>1.5,'토'=>1.2,'금'=>0.5,'수'=>0.7],
+        '토' => ['목'=>0.7,'화'=>1.0,'토'=>1.5,'금'=>1.2,'수'=>0.5],
+        '금' => ['목'=>0.5,'화'=>0.7,'토'=>1.0,'금'=>1.5,'수'=>1.2],
+        '수' => ['목'=>1.2,'화'=>0.5,'토'=>0.7,'금'=>1.0,'수'=>1.5],
+    ];
+
+    public function __construct(SajuEngine $engine) {
+        $this->engine = $engine;
+        $this->ohangCount = $this->countOhangBasic();
+        $this->weightedOhangCount = $this->countOhangWeighted();
+    }
+
+    // ===== 기본 오행 카운트 (천간+지지 본기) =====
+    private function countOhangBasic() {
+        $count = ['목'=>0,'화'=>0,'토'=>0,'금'=>0,'수'=>0];
+        $elements = $this->engine->getAllElements();
+        foreach ($elements['stems'] as $si) {
+            $count[SajuEngine::CHEONGAN_OHANG[SajuEngine::CHEONGAN[$si]]]++;
+        }
+        foreach ($elements['branches'] as $bi) {
+            $count[SajuEngine::JIJI_OHANG[SajuEngine::JIJI[$bi]]]++;
+        }
+        return $count;
+    }
+
+    // ===== 지장간 가중치 반영 오행 카운트 =====
+    private function countOhangWeighted() {
+        $count = ['목'=>0.0,'화'=>0.0,'토'=>0.0,'금'=>0.0,'수'=>0.0];
+        $elements = $this->engine->getAllElements();
+
+        // 천간: 각 1.0
+        foreach ($elements['stems'] as $si) {
+            $stem = SajuEngine::CHEONGAN[$si];
+            $count[SajuEngine::CHEONGAN_OHANG[$stem]] += 1.0;
+        }
+
+        // 지지: 지장간 비율 반영 (총 1.0씩)
+        foreach ($elements['branches'] as $bi) {
+            $branch = SajuEngine::JIJI[$bi];
+            foreach (SajuEngine::JIJANGGAN[$branch] as $item) {
+                $el = SajuEngine::CHEONGAN_OHANG[$item[0]];
+                $count[$el] += $item[1]; // 비율만큼 가중
+            }
+        }
+        // 소수점 2자리 정리
+        foreach ($count as $k => $v) $count[$k] = round($v, 2);
+        return $count;
+    }
+
+    // ===== 전체 분석 결과 =====
+    public function analyze() {
+        $dayMasterElement = $this->engine->getDayMasterElement();
+        $seasonElement = $this->getSeasonElement();
+        $result = $this->engine->getResult();
+        $strengthData = $result['day_master_strength'] ?? [];
+
+        return [
+            'day_master_element' => $dayMasterElement,
+            'day_master_element_hanja' => self::OHANG_PROPERTIES[$dayMasterElement]['hanja'],
+            'ohang_count' => $this->ohangCount,
+            'weighted_ohang_count' => $this->weightedOhangCount,
+            'total' => array_sum($this->ohangCount),
+            'weighted_total' => round(array_sum($this->weightedOhangCount), 2),
+            'strong_elements' => $this->getStrongElements(),
+            'weak_elements' => $this->getWeakElements(),
+            'missing_elements' => $this->getMissingElements(),
+            'weighted_strong' => $this->getWeightedStrong(),
+            'weighted_weak' => $this->getWeightedWeak(),
+            'balance' => $this->getBalanceScore(),
+            'weighted_balance' => $this->getWeightedBalanceScore(),
+            'balance_description' => $this->getBalanceDescription(),
+            'season_element' => $seasonElement,
+            'season_analysis' => $this->getSeasonAnalysis($dayMasterElement, $seasonElement),
+            'properties' => self::OHANG_PROPERTIES,
+            'interpretation' => $this->getInterpretation(),
+            'relationships' => $this->getRelationships(),
+            'flow_analysis' => $this->getFlowAnalysis(),
+            'yongsin_info' => $strengthData['yongshin'] ?? null,
+            'health_analysis' => $this->getHealthAnalysis(),
+            'supplementary' => $this->getSupplementaryAdvice(),
+        ];
+    }
+
+    // ===== 현재 월지 기준 계절 오행 =====
+    private function getSeasonElement() {
+        $result = $this->engine->getResult();
+        return $result['month_pillar']['branch_element'];
+    }
+
+    // ===== 계절 강약 분석 =====
+    private function getSeasonAnalysis($dayElement, $seasonElement) {
+        $strengthMap = self::SEASONAL_STRENGTH[$seasonElement] ?? null;
+        if (!$strengthMap) return ['description'=>'계절 분석 불가'];
+
+        $myStrength = $strengthMap[$dayElement];
+        $labels = ['사(死)'=>0.5, '수(囚)'=>0.7, '휴(休)'=>1.0, '상(相)'=>1.2, '왕(旺)'=>1.5];
+        $label = '휴(休)';
+        foreach ($labels as $lbl => $val) {
+            if (abs($myStrength - $val) < 0.01) { $label = $lbl; break; }
+        }
+
+        $seasonNames = ['목'=>'봄','화'=>'여름','토'=>'환절기','금'=>'가을','수'=>'겨울'];
+        $deukryeong = ($myStrength >= 1.2);
+
+        $desc = sprintf(
+            "태어난 계절은 %s(%s)의 기운이 지배합니다. 일간 %s(%s)의 계절적 상태는 '%s' 입니다. %s",
+            $seasonNames[$seasonElement] ?? $seasonElement,
+            self::OHANG_PROPERTIES[$seasonElement]['hanja'],
+            $dayElement,
+            self::OHANG_PROPERTIES[$dayElement]['hanja'],
+            $label,
+            $deukryeong
+                ? "계절의 기운이 일간을 도와 '득령(得令)' 상태로, 기본 에너지가 강합니다."
+                : "계절의 기운이 일간을 돕지 못해 '실령(失令)' 상태로, 외부의 도움이 필요합니다."
+        );
+
+        return [
+            'season_element' => $seasonElement,
+            'season_name' => $seasonNames[$seasonElement] ?? '',
+            'day_master_seasonal_strength' => $myStrength,
+            'label' => $label,
+            'deukryeong' => $deukryeong,
+            'description' => $desc,
+            'all_strengths' => $strengthMap,
+        ];
+    }
+
+    // ===== 오행 상생/상극 흐름 분석 =====
+    private function getFlowAnalysis() {
+        $wc = $this->weightedOhangCount;
+        $cycle = self::OHANG_CYCLE;
+        $flows = [];
+
+        // 상생 흐름 검사
+        for ($i = 0; $i < 5; $i++) {
+            $from = $cycle[$i];
+            $to = $cycle[($i+1)%5];
+            $fromVal = $wc[$from]; $toVal = $wc[$to];
+            $hasFlow = ($fromVal >= 0.8 && $toVal >= 0.3);
+            $flows['sangsaeng'][] = [
+                'from'=>$from, 'to'=>$to,
+                'from_value'=>$fromVal, 'to_value'=>$toVal,
+                'active'=>$hasFlow,
+                'description'=>$hasFlow
+                    ? "{$from}({$fromVal})→{$to}({$toVal}): 상생 흐름이 원활합니다."
+                    : "{$from}({$fromVal})→{$to}({$toVal}): 상생 흐름이 약합니다."
+            ];
+        }
+
+        // 상극 관계 검사
+        foreach (self::OHANG_CONTROL as $from => $to) {
+            $fromVal = $wc[$from]; $toVal = $wc[$to];
+            $isConflict = ($fromVal >= 1.5 && $toVal >= 1.0);
+            $flows['sanggeuk'][] = [
+                'from'=>$from, 'to'=>$to,
+                'from_value'=>$fromVal, 'to_value'=>$toVal,
+                'active'=>$isConflict,
+                'description'=>$isConflict
+                    ? "{$from}({$fromVal})→{$to}({$toVal}): 상극 작용이 강하게 일어나고 있습니다."
+                    : "{$from}({$fromVal})→{$to}({$toVal}): 상극 작용이 미약합니다."
+            ];
+        }
+
+        // 순환 흐름 종합 판단
+        $activeFlows = count(array_filter($flows['sangsaeng'], fn($f)=>$f['active']));
+        if ($activeFlows >= 4) {
+            $flows['summary'] = '오행의 상생 순환이 매우 잘 이루어지고 있어 기운이 원활하게 흐릅니다. 건강과 운세 모두 안정적입니다.';
+        } elseif ($activeFlows >= 2) {
+            $flows['summary'] = '부분적으로 상생 흐름이 이루어지고 있습니다. 약한 부분을 보완하면 더 좋은 결과를 얻을 수 있습니다.';
+        } else {
+            $flows['summary'] = '상생 순환이 원활하지 않아 기운의 흐름에 막힘이 있을 수 있습니다. 부족한 오행을 적극 보완하세요.';
+        }
+
+        return $flows;
+    }
+
+    // ===== 건강 분석 =====
+    private function getHealthAnalysis() {
+        $wc = $this->weightedOhangCount;
+        $missing = $this->getMissingElements();
+        $warnings = [];
+
+        foreach (self::OHANG_CYCLE as $el) {
+            $val = $wc[$el];
+            $props = self::OHANG_PROPERTIES[$el];
+            if ($val < 0.3) {
+                $warnings[] = [
+                    'element'=>$el,'level'=>'주의',
+                    'organ'=>$props['organ'],
+                    'message'=>"{$el}({$props['hanja']})의 기운이 매우 부족합니다. {$props['organ']} 건강에 특히 주의하세요. {$props['taste']}을 적절히 섭취하면 도움이 됩니다."
+                ];
+            } elseif ($val >= 3.0) {
+                $warnings[] = [
+                    'element'=>$el,'level'=>'과잉 주의',
+                    'organ'=>$props['organ'],
+                    'message'=>"{$el}({$props['hanja']})의 기운이 과도합니다. {$props['organ']}에 무리가 갈 수 있으니 {$props['emotion']}을(를) 조절하고 {$props['taste']} 음식을 줄이세요."
+                ];
+            }
+        }
+
+        if (empty($warnings)) {
+            return ['status'=>'양호','warnings'=>[],'summary'=>'오행이 비교적 균형을 이루어 전반적 건강 기반이 안정적입니다. 규칙적인 생활과 운동으로 좋은 상태를 유지하세요.'];
+        }
+
+        return [
+            'status'=>'주의 필요',
+            'warnings'=>$warnings,
+            'summary'=>'일부 오행의 편중이 있어 관련 장기 건강에 주의가 필요합니다. 아래 세부 사항을 참고하여 관리하세요.'
+        ];
+    }
+
+    // ===== 보완 종합 조언 =====
+    private function getSupplementaryAdvice() {
+        $result = $this->engine->getResult();
+        $strengthData = $result['day_master_strength'] ?? [];
+        $yongsin = $strengthData['yongshin'] ?? null;
+        $dayElement = $this->engine->getDayMasterElement();
+        $wc = $this->weightedOhangCount;
+
+        $advice = [];
+
+        // 용신 기반 조언
+        if ($yongsin) {
+            $primary = $yongsin['primary'];
+            $pp = self::OHANG_PROPERTIES[$primary];
+            $advice['yongsin'] = sprintf(
+                "【용신 보완】%s(%s)의 기운을 높이는 것이 가장 중요합니다. %s 색상의 옷이나 소품을 활용하고, %s쪽 방위가 유리합니다. %s 계절에 중요한 결정을 하면 좋습니다.",
+                $primary, $pp['hanja'], $pp['color'], $pp['direction'], $pp['season']
+            );
+        }
+
+        // 부족 오행 보완
+        $weak = $this->getWeightedWeak();
+        if (!empty($weak)) {
+            $advParts = [];
+            foreach ($weak as $el) {
+                $pp = self::OHANG_PROPERTIES[$el];
+                $advParts[] = "{$el}({$pp['hanja']}): {$pp['color']} 계열 / {$pp['direction']}쪽 / {$pp['taste']} 음식";
+            }
+            $advice['supplement'] = "【부족 오행 보완법】\n" . implode("\n", $advParts);
+        }
+
+        // 과잉 오행 조절
+        $overElements = array_filter($wc, fn($v)=>$v >= 2.5);
+        if (!empty($overElements)) {
+            $advParts = [];
+            foreach ($overElements as $el => $v) {
+                $controlTarget = self::OHANG_CONTROL[$el];
+                $advParts[] = "{$el}의 기운이 과다하니, {$controlTarget}의 기운으로 조절하거나 설기(洩氣)시키세요.";
+            }
+            $advice['control'] = "【과잉 오행 조절】\n" . implode("\n", $advParts);
+        }
+
+        // 직업 방향 조언 (용신 기반)
+        if ($yongsin) {
+            $careerMap = [
+                '목'=>'교육, 출판, 의류, 가구, 조경, 환경, 농업',
+                '화'=>'IT, 미디어, 엔터테인먼트, 요식업, 조명, 에너지',
+                '토'=>'부동산, 건설, 농업, 도자기, 금융(보험), 의료',
+                '금'=>'금융, 기계, 자동차, 귀금속, 법률, 군경, IT하드웨어',
+                '수'=>'무역, 물류, 해운, 수산, 관광, 미용, 음료',
+            ];
+            $advice['career'] = sprintf("【유리한 직업 방향】용신 %s(%s) 관련: %s",
+                $yongsin['primary'], self::OHANG_PROPERTIES[$yongsin['primary']]['hanja'],
+                $careerMap[$yongsin['primary']] ?? '다양한 분야');
+        }
+
+        return $advice;
+    }
+
+    // ===== 기본 분류 =====
+    private function getStrongElements() {
+        return array_keys(array_filter($this->ohangCount, fn($v) => $v >= 2));
+    }
+    private function getWeakElements() {
+        return array_keys(array_filter($this->ohangCount, fn($v) => $v == 1));
+    }
+    private function getMissingElements() {
+        return array_keys(array_filter($this->ohangCount, fn($v) => $v == 0));
+    }
+    private function getWeightedStrong() {
+        return array_keys(array_filter($this->weightedOhangCount, fn($v) => $v >= 2.0));
+    }
+    private function getWeightedWeak() {
+        return array_keys(array_filter($this->weightedOhangCount, fn($v) => $v < 0.8));
+    }
+
+    // ===== 균형 점수 =====
+    private function getBalanceScore() {
+        $total = array_sum($this->ohangCount);
+        if ($total === 0) return 0;
+        $ideal = $total / 5;
+        $dev = 0;
+        foreach ($this->ohangCount as $c) $dev += abs($c - $ideal);
+        return (int)round(max(0, 100 - ($dev / ($total * 0.8) * 100)));
+    }
+
+    private function getWeightedBalanceScore() {
+        $total = array_sum($this->weightedOhangCount);
+        if ($total <= 0) return 0;
+        $ideal = $total / 5;
+        $dev = 0;
+        foreach ($this->weightedOhangCount as $c) $dev += abs($c - $ideal);
+        return (int)round(max(0, 100 - ($dev / ($total * 0.8) * 100)));
+    }
+
+    private function getBalanceDescription() {
+        $score = $this->getWeightedBalanceScore();
+        if ($score >= 80) return '오행이 매우 균형 잡혀 있어 조화로운 사주입니다.';
+        if ($score >= 60) return '오행이 비교적 균형 잡혀 있으나 일부 보완이 도움이 됩니다.';
+        if ($score >= 40) return '오행에 편중이 있어 부족한 기운을 보완하면 좋겠습니다.';
+        if ($score >= 20) return '오행의 편중이 큰 편으로 적극적인 보완이 필요합니다.';
+        return '오행이 크게 치우쳐 있어 균형 회복을 위한 노력이 중요합니다.';
+    }
+
+    // ===== 해석 =====
+    private function getInterpretation() {
+        $dayMasterElement = $this->engine->getDayMasterElement();
+        $strong = $this->getWeightedStrong();
+        $weak = $this->getWeightedWeak();
+        $missing = $this->getMissingElements();
+        $wc = $this->weightedOhangCount;
+
+        $interpretation = [];
+
+        // 일간 오행 해석
+        $props = self::OHANG_PROPERTIES[$dayMasterElement];
+        $interpretation['day_master'] = sprintf(
+            "당신의 일간 오행은 %s(%s)입니다. %s의 기운을 타고나 %s의 성격적 특성을 지닙니다.\n".
+            "계절: %s | 방위: %s | 색상: %s | 장부: %s\n".
+            "감정: %s | 맛: %s | 수리: %s",
+            $dayMasterElement, $props['hanja'], $props['nature'], $props['character'],
+            $props['season'], $props['direction'], $props['color'], $props['organ'],
+            $props['emotion'], $props['taste'], $props['number']
+        );
+
+        // 지장간 반영 오행 분포
+        $distDesc = [];
+        arsort($wc);
+        foreach ($wc as $el => $val) {
+            $pct = round(($val / max(1, array_sum($this->weightedOhangCount))) * 100, 1);
+            $bar = str_repeat('■', (int)round($pct / 5)) . str_repeat('□', max(0, 20 - (int)round($pct / 5)));
+            $distDesc[] = sprintf("  %s(%s) %s %.1f (%.1f%%)", $el, self::OHANG_PROPERTIES[$el]['hanja'], $bar, $val, $pct);
+        }
+        $interpretation['distribution'] = "【오행 분포 (지장간 반영)】\n" . implode("\n", $distDesc);
+
+        // 강한 오행
+        if (!empty($strong)) {
+            $parts = [];
+            foreach ($strong as $el) $parts[] = "{$el}(" . self::OHANG_PROPERTIES[$el]['hanja'] . ", {$wc[$el]})";
+            $interpretation['strong'] = "강한 오행: " . implode(', ', $parts) . "\n";
+            foreach ($strong as $el) $interpretation['strong'] .= self::getElementStrengthMeaning($el, true) . ' ';
+        }
+
+        // 약한/부족 오행
+        if (!empty($missing)) {
+            $parts = [];
+            foreach ($missing as $el) $parts[] = "{$el}(" . self::OHANG_PROPERTIES[$el]['hanja'] . ")";
+            $interpretation['missing'] = "부족한 오행: " . implode(', ', $parts) . "\n";
+            foreach ($missing as $el) $interpretation['missing'] .= self::getElementStrengthMeaning($el, false) . ' ';
+        } elseif (!empty($weak)) {
+            $parts = [];
+            foreach ($weak as $el) $parts[] = "{$el}(" . self::OHANG_PROPERTIES[$el]['hanja'] . ", {$wc[$el]})";
+            $interpretation['weak'] = "약한 오행: " . implode(', ', $parts) . "\n";
+            foreach ($weak as $el) $interpretation['weak'] .= self::getElementStrengthMeaning($el, false) . ' ';
+        }
+
+        $interpretation['advice'] = $this->getBalanceAdvice();
+
+        return $interpretation;
+    }
+
+    private static function getElementStrengthMeaning($element, $isStrong) {
+        $meanings = [
+            '목' => [
+                'strong'=>'추진력과 성장 에너지가 강하여 새로운 일을 시작하는 데 유리합니다. 다만 고집이 셀 수 있으니 유연함을 기르세요.',
+                'weak'=>'시작하는 힘과 결단력이 부족할 수 있습니다. 봄의 기운, 초록색, 동쪽 방위가 보완에 도움이 됩니다.'
+            ],
+            '화' => [
+                'strong'=>'열정과 표현력이 뛰어납니다. 예술적 감각이 있으나 감정 조절에 유의하세요.',
+                'weak'=>'열정과 적극성이 부족할 수 있습니다. 빨간색, 남쪽, 따뜻한 환경이 도움이 됩니다.'
+            ],
+            '토' => [
+                'strong'=>'안정감과 포용력이 뛰어납니다. 신뢰감을 주지만 변화를 두려워할 수 있습니다.',
+                'weak'=>'중심과 안정감이 부족할 수 있습니다. 노란색, 중앙, 단맛 음식이 보완에 도움이 됩니다.'
+            ],
+            '금' => [
+                'strong'=>'의리와 결단력이 뛰어납니다. 추진력이 강하지만 유연함이 필요합니다.',
+                'weak'=>'결단력과 추진력이 부족할 수 있습니다. 흰색, 서쪽, 금속 소재가 보완에 도움이 됩니다.'
+            ],
+            '수' => [
+                'strong'=>'지혜롭고 적응력이 뛰어납니다. 융통성이 좋지만 우유부단하지 않도록 하세요.',
+                'weak'=>'지혜와 유연성이 부족할 수 있습니다. 검정색, 북쪽, 물 관련 환경이 도움이 됩니다.'
+            ],
+        ];
+        $key = $isStrong ? 'strong' : 'weak';
+        return $meanings[$element][$key] ?? '';
+    }
+
+    private function getBalanceAdvice() {
+        $missing = $this->getMissingElements();
+        $weak = $this->getWeightedWeak();
+        $needElements = array_unique(array_merge($missing, $weak));
+
+        if (empty($needElements)) {
+            return "오행이 대체로 균형을 이루고 있어 안정적인 사주입니다. 현재의 균형을 잘 유지하세요.";
+        }
+
+        $advices = [];
+        foreach ($needElements as $el) {
+            $props = self::OHANG_PROPERTIES[$el];
+            $advices[] = sprintf(
+                "%s(%s): %s 색 활용 / %s 방위 / %s 음식 / %s에 활동 강화",
+                $el, $props['hanja'], $props['color'], $props['direction'], $props['taste'], $props['season']
+            );
+        }
+        return "【보완이 필요한 오행】\n" . implode("\n", $advices);
+    }
+
+    // ===== 관계 분석 =====
+    private function getRelationships() {
+        $dayMasterElement = $this->engine->getDayMasterElement();
+        $cycle = self::OHANG_CYCLE;
+        $idx = array_search($dayMasterElement, $cycle);
+
+        $generates = $cycle[($idx+1)%5];
+        $controls = $cycle[($idx+2)%5];
+        $controlledBy = $cycle[($idx+3)%5];
+        $generatedBy = $cycle[($idx+4)%5];
+
+        return [
+            'generates' => [
+                'element'=>$generates,
+                'meaning'=>sprintf("%s(%s)이(가) %s(%s)을(를) 생합니다 (식상·食傷). 표현과 산출의 기운입니다.",
+                    $dayMasterElement, self::OHANG_PROPERTIES[$dayMasterElement]['hanja'],
+                    $generates, self::OHANG_PROPERTIES[$generates]['hanja'])
+            ],
+            'controls' => [
+                'element'=>$controls,
+                'meaning'=>sprintf("%s(%s)이(가) %s(%s)을(를) 극합니다 (재성·財星). 재물과 관리의 기운입니다.",
+                    $dayMasterElement, self::OHANG_PROPERTIES[$dayMasterElement]['hanja'],
+                    $controls, self::OHANG_PROPERTIES[$controls]['hanja'])
+            ],
+            'controlled_by' => [
+                'element'=>$controlledBy,
+                'meaning'=>sprintf("%s(%s)이(가) 나를 극합니다 (관성·官星). 직장과 권력의 기운입니다.",
+                    $controlledBy, self::OHANG_PROPERTIES[$controlledBy]['hanja'])
+            ],
+            'generated_by' => [
+                'element'=>$generatedBy,
+                'meaning'=>sprintf("%s(%s)이(가) 나를 생합니다 (인성·印星). 학문과 보호의 기운입니다.",
+                    $generatedBy, self::OHANG_PROPERTIES[$generatedBy]['hanja'])
+            ],
+            'same' => [
+                'element'=>$dayMasterElement,
+                'meaning'=>sprintf("%s(%s)은(는) 나와 같은 기운 (비겁·比劫). 동료와 경쟁의 기운입니다.",
+                    $dayMasterElement, self::OHANG_PROPERTIES[$dayMasterElement]['hanja'])
+            ],
+        ];
+    }
+}

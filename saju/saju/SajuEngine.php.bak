@@ -1,0 +1,466 @@
+<?php
+/**
+ * 사주팔자 계산 엔진
+ * 한국 전통 명리학 기준으로 구현
+ * 
+ * 기능:
+ * - 년주, 월주, 일주, 시주 계산
+ * - 60갑자 체계 적용
+ * - 절기 기준 월주 계산
+ * - 양력/음력 지원
+ */
+
+class SajuEngine {
+    
+    // ===== 천간 (10 Heavenly Stems) =====
+    const CHEONGAN = ['갑', '을', '병', '정', '무', '기', '경', '신', '임', '계'];
+    
+    // 천간 한자
+    const CHEONGAN_HANJA = ['甲', '乙', '丙', '丁', '戊', '己', '庚', '辛', '壬', '癸'];
+    
+    // ===== 지지 (12 Earthly Branches) =====
+    const JIJI = ['자', '축', '인', '묘', '진', '사', '오', '미', '신', '유', '술', '해'];
+    
+    // 지지 한자
+    const JIJI_HANJA = ['子', '丑', '寅', '卯', '辰', '巳', '午', '未', '申', '酉', '戌', '亥'];
+    
+    // ===== 오행 (Five Elements) =====
+    const OHANG = ['목', '화', '토', '금', '수'];
+    const OHANG_HANJA = ['木', '火', '土', '金', '水'];
+    const OHANG_COLORS = ['#4CAF50', '#F44336', '#FF9800', '#FFD700', '#2196F3'];
+    
+    // 천간 → 오행 매핑
+    const CHEONGAN_OHANG = [
+        '갑' => '목', '을' => '목',
+        '병' => '화', '정' => '화',
+        '무' => '토', '기' => '토',
+        '경' => '금', '신' => '금',
+        '임' => '수', '계' => '수'
+    ];
+    
+    // 지지 → 오행 매핑
+    const JIJI_OHANG = [
+        '자' => '수', '축' => '토',
+        '인' => '목', '묘' => '목',
+        '진' => '토', '사' => '화',
+        '오' => '화', '미' => '토',
+        '신' => '금', '유' => '금',
+        '술' => '토', '해' => '수'
+    ];
+    
+    // 천간 음양 (0=양, 1=음)
+    const CHEONGAN_YINYANG = [0, 1, 0, 1, 0, 1, 0, 1, 0, 1];
+    
+    // 지지 음양
+    const JIJI_YINYANG = [0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1];
+    
+    // ===== 절기 데이터 (월별 시작 절기 - 태양 경도 기준 근사 날짜) =====
+    // 각 월의 시작 절기 날짜 (월, 일) - 평균적 절기
+    const JEOLGI_DATES = [
+        1  => [2, 4],   // 인월(寅月): 입춘 2/4
+        2  => [3, 6],   // 묘월(卯月): 경칩 3/6
+        3  => [4, 5],   // 진월(辰月): 청명 4/5
+        4  => [5, 6],   // 사월(巳月): 입하 5/6
+        5  => [6, 6],   // 오월(午月): 망종 6/6
+        6  => [7, 7],   // 미월(未月): 소서 7/7
+        7  => [8, 7],   // 신월(申月): 입추 8/7
+        8  => [9, 8],   // 유월(酉月): 백로 9/8
+        9  => [10, 8],  // 술월(戌月): 한로 10/8
+        10 => [11, 7],  // 해월(亥月): 입동 11/7
+        11 => [12, 7],  // 자월(子月): 대설 12/7
+        12 => [1, 6],   // 축월(丑月): 소한 1/6
+    ];
+    
+    // 지지 → 띠(생초) 매핑
+    const ZODIAC_ANIMALS = [
+        '자' => '쥐', '축' => '소', '인' => '호랑이', '묘' => '토끼',
+        '진' => '용', '사' => '뱀', '오' => '말', '미' => '양',
+        '신' => '원숭이', '유' => '닭', '술' => '개', '해' => '돼지'
+    ];
+    
+    // 시간 → 지지 매핑 (시진)
+    const HOUR_TO_JIJI = [
+        23 => 0, 0 => 0,   // 자시 23:00-01:00
+        1 => 1, 2 => 1,    // 축시 01:00-03:00
+        3 => 2, 4 => 2,    // 인시 03:00-05:00
+        5 => 3, 6 => 3,    // 묘시 05:00-07:00
+        7 => 4, 8 => 4,    // 진시 07:00-09:00
+        9 => 5, 10 => 5,   // 사시 09:00-11:00
+        11 => 6, 12 => 6,  // 오시 11:00-13:00
+        13 => 7, 14 => 7,  // 미시 13:00-15:00
+        15 => 8, 16 => 8,  // 신시 15:00-17:00
+        17 => 9, 18 => 9,  // 유시 17:00-19:00
+        19 => 10, 20 => 10, // 술시 19:00-21:00
+        21 => 11, 22 => 11  // 해시 21:00-23:00
+    ];
+    
+    // 시진 이름
+    const SIJI_NAMES = [
+        '자시(子時) 23:00~01:00', '축시(丑時) 01:00~03:00',
+        '인시(寅時) 03:00~05:00', '묘시(卯時) 05:00~07:00',
+        '진시(辰時) 07:00~09:00', '사시(巳時) 09:00~11:00',
+        '오시(午時) 11:00~13:00', '미시(未時) 13:00~15:00',
+        '신시(申時) 15:00~17:00', '유시(酉時) 17:00~19:00',
+        '술시(戌時) 19:00~21:00', '해시(亥時) 21:00~23:00'
+    ];
+    
+    // ===== 입력 데이터 =====
+    private $birthYear;
+    private $birthMonth;
+    private $birthDay;
+    private $birthHour;
+    private $gender;        // 'male' or 'female'
+    private $calendarType;  // 'solar' or 'lunar'
+    
+    // ===== 계산 결과 =====
+    private $solarDate;     // 양력 변환 후 날짜
+    private $yearPillar;    // 년주 [천간인덱스, 지지인덱스]
+    private $monthPillar;   // 월주
+    private $dayPillar;     // 일주
+    private $hourPillar;    // 시주
+    
+    /**
+     * 생성자
+     * @param int $year
+     * @param int $month
+     * @param int $day
+     * @param int $hour (0-23)
+     * @param string $gender ('male' or 'female')
+     * @param string $calendarType ('solar' or 'lunar')
+     */
+    public function __construct($year, $month, $day, $hour, $gender, $calendarType = 'solar') {
+        $this->birthYear = (int)$year;
+        $this->birthMonth = (int)$month;
+        $this->birthDay = (int)$day;
+        $this->birthHour = (int)$hour;
+        $this->gender = $gender;
+        $this->calendarType = $calendarType;
+        
+        // 음력이면 양력 변환
+        if ($calendarType === 'lunar') {
+            $this->convertLunarToSolar();
+        } else {
+            $this->solarDate = [
+                'year' => $this->birthYear,
+                'month' => $this->birthMonth,
+                'day' => $this->birthDay
+            ];
+        }
+        
+        // 사주팔자 계산
+        $this->calculate();
+    }
+    
+    /**
+     * 음력 → 양력 변환 (근사치)
+     * 실제 서비스에서는 한국천문연구원 API 또는 정밀 변환 테이블 사용 권장
+     */
+    private function convertLunarToSolar() {
+        // 음력-양력 변환 근사치 (약 30일 차이)
+        // 실제 서비스에서는 정확한 변환 라이브러리를 사용해야 합니다
+        $lunarOffset = 30; // 평균적 음양력 차이 (일)
+        
+        $timestamp = mktime(0, 0, 0, $this->birthMonth, $this->birthDay + $lunarOffset, $this->birthYear);
+        
+        $this->solarDate = [
+            'year' => (int)date('Y', $timestamp),
+            'month' => (int)date('n', $timestamp),
+            'day' => (int)date('j', $timestamp)
+        ];
+    }
+    
+    /**
+     * 사주팔자 전체 계산
+     */
+    private function calculate() {
+        $this->calculateYearPillar();
+        $this->calculateMonthPillar();
+        $this->calculateDayPillar();
+        $this->calculateHourPillar();
+    }
+    
+    /**
+     * 년주 계산
+     * 절기 기준: 입춘(2월 4일경) 이전이면 전년도 적용
+     */
+    private function calculateYearPillar() {
+        $year = $this->solarDate['year'];
+        $month = $this->solarDate['month'];
+        $day = $this->solarDate['day'];
+        
+        // 입춘 이전이면 전년도 기준
+        if ($month < 2 || ($month == 2 && $day < 4)) {
+            $year -= 1;
+        }
+        
+        $stemIndex = ($year - 4) % 10;
+        if ($stemIndex < 0) $stemIndex += 10;
+        
+        $branchIndex = ($year - 4) % 12;
+        if ($branchIndex < 0) $branchIndex += 12;
+        
+        $this->yearPillar = [$stemIndex, $branchIndex];
+    }
+    
+    /**
+     * 월주 계산 (절기 기준)
+     */
+    private function calculateMonthPillar() {
+        $month = $this->solarDate['month'];
+        $day = $this->solarDate['day'];
+        
+        // 절기 기준으로 사주 월 결정
+        $sajuMonth = $this->getSajuMonth($month, $day);
+        
+        // 월주 지지: 인월(1)부터 시작
+        // 1=인(2), 2=묘(3), ..., 11=자(0), 12=축(1)
+        $monthBranch = ($sajuMonth + 1) % 12;
+        
+        // 월주 천간: 년간에 따라 결정
+        // 갑/기 년 → 병인월, 을/경 년 → 무인월, 병/신 년 → 경인월, 정/임 년 → 임인월, 무/계 년 → 갑인월
+        $yearStem = $this->yearPillar[0];
+        $monthStemStart = ($yearStem % 5) * 2 + 2;
+        $monthStem = ($monthStemStart + $sajuMonth - 1) % 10;
+        
+        $this->monthPillar = [$monthStem, $monthBranch];
+    }
+    
+    /**
+     * 절기 기준 사주 월 결정 (1-12)
+     * @param int $month 양력 월
+     * @param int $day 양력 일
+     * @return int 사주 월 (1=인월, 2=묘월, ...)
+     */
+    private function getSajuMonth($month, $day) {
+        // 절기를 체크하여 해당하는 사주 월을 반환
+        foreach (self::JEOLGI_DATES as $sajuMonth => $jeolgi) {
+            $nextMonth = $sajuMonth + 1;
+            if ($nextMonth > 12) $nextMonth = 1;
+            
+            $nextJeolgi = self::JEOLGI_DATES[$nextMonth] ?? self::JEOLGI_DATES[1];
+            
+            $jeolgiMonth = $jeolgi[0];
+            $jeolgiDay = $jeolgi[1];
+            $nextJeolgiMonth = $nextJeolgi[0];
+            $nextJeolgiDay = $nextJeolgi[1];
+            
+            // 현재 절기 ~ 다음 절기 사이인지 확인
+            $afterStart = ($month > $jeolgiMonth) || ($month == $jeolgiMonth && $day >= $jeolgiDay);
+            $beforeEnd = ($month < $nextJeolgiMonth) || ($month == $nextJeolgiMonth && $day < $nextJeolgiDay);
+            
+            // 연도를 넘어가는 경우 (12월→1월) 처리
+            if ($jeolgiMonth > $nextJeolgiMonth) {
+                if ($afterStart || $beforeEnd) {
+                    return $sajuMonth;
+                }
+            } else {
+                if ($afterStart && $beforeEnd) {
+                    return $sajuMonth;
+                }
+            }
+        }
+        
+        return 1; // 기본값
+    }
+    
+    /**
+     * 일주 계산 (율리우스 적일 기반)
+     */
+    private function calculateDayPillar() {
+        $jd = $this->getJulianDay(
+            $this->solarDate['year'],
+            $this->solarDate['month'],
+            $this->solarDate['day']
+        );
+        
+        // 기준일: 2000-01-07 = 甲子(갑자)일 → JD 2451551
+        $refJD = 2451551;
+        $dayIndex = ($jd - $refJD) % 60;
+        if ($dayIndex < 0) $dayIndex += 60;
+        
+        $stemIndex = $dayIndex % 10;
+        $branchIndex = $dayIndex % 12;
+        
+        // 자시(23:00~01:00) 처리: 23시 이후는 다음 날 일주
+        if ($this->birthHour >= 23) {
+            $dayIndex = ($dayIndex + 1) % 60;
+            $stemIndex = $dayIndex % 10;
+            $branchIndex = $dayIndex % 12;
+        }
+        
+        $this->dayPillar = [$stemIndex, $branchIndex];
+    }
+    
+    /**
+     * 시주 계산
+     */
+    private function calculateHourPillar() {
+        // 시간 → 지지 인덱스
+        $hourBranch = self::HOUR_TO_JIJI[$this->birthHour];
+        
+        // 일간에 따른 시두(時頭) 결정
+        // 갑/기일 → 갑자시, 을/경일 → 병자시, 병/신일 → 무자시, 정/임일 → 경자시, 무/계일 → 임자시
+        $dayStem = $this->dayPillar[0];
+        $hourStemStart = ($dayStem % 5) * 2;
+        $hourStem = ($hourStemStart + $hourBranch) % 10;
+        
+        $this->hourPillar = [$hourStem, $hourBranch];
+    }
+    
+    /**
+     * 율리우스 적일 계산
+     * @param int $year
+     * @param int $month
+     * @param int $day
+     * @return int
+     */
+    private function getJulianDay($year, $month, $day) {
+        if ($month <= 2) {
+            $year -= 1;
+            $month += 12;
+        }
+        
+        $A = floor($year / 100);
+        $B = 2 - $A + floor($A / 4);
+        
+        return (int)(floor(365.25 * ($year + 4716)) + floor(30.6001 * ($month + 1)) + $day + $B - 1524);
+    }
+    
+    // ===== 결과 조회 메서드 =====
+    
+    /**
+     * 사주팔자 전체 결과 반환
+     * @return array
+     */
+    public function getResult() {
+        return [
+            'input' => [
+                'year' => $this->birthYear,
+                'month' => $this->birthMonth,
+                'day' => $this->birthDay,
+                'hour' => $this->birthHour,
+                'gender' => $this->gender,
+                'calendar_type' => $this->calendarType,
+            ],
+            'solar_date' => $this->solarDate,
+            'year_pillar' => $this->getPillarInfo($this->yearPillar),
+            'month_pillar' => $this->getPillarInfo($this->monthPillar),
+            'day_pillar' => $this->getPillarInfo($this->dayPillar),
+            'hour_pillar' => $this->getPillarInfo($this->hourPillar),
+            'zodiac' => self::ZODIAC_ANIMALS[self::JIJI[$this->yearPillar[1]]],
+            'day_master' => self::CHEONGAN[$this->dayPillar[0]],
+            'day_master_element' => self::CHEONGAN_OHANG[self::CHEONGAN[$this->dayPillar[0]]],
+            'siji_name' => self::SIJI_NAMES[self::HOUR_TO_JIJI[$this->birthHour]],
+        ];
+    }
+    
+    /**
+     * 주(柱) 상세 정보 반환
+     * @param array $pillar [천간인덱스, 지지인덱스]
+     * @return array
+     */
+    private function getPillarInfo($pillar) {
+        $stem = self::CHEONGAN[$pillar[0]];
+        $branch = self::JIJI[$pillar[1]];
+        $stemHanja = self::CHEONGAN_HANJA[$pillar[0]];
+        $branchHanja = self::JIJI_HANJA[$pillar[1]];
+        $stemElement = self::CHEONGAN_OHANG[$stem];
+        $branchElement = self::JIJI_OHANG[$branch];
+        $stemYinyang = self::CHEONGAN_YINYANG[$pillar[0]] === 0 ? '양' : '음';
+        $branchYinyang = self::JIJI_YINYANG[$pillar[1]] === 0 ? '양' : '음';
+        
+        // 오행 색상
+        $stemColorIndex = array_search($stemElement, self::OHANG);
+        $branchColorIndex = array_search($branchElement, self::OHANG);
+        
+        return [
+            'stem' => $stem,
+            'branch' => $branch,
+            'stem_hanja' => $stemHanja,
+            'branch_hanja' => $branchHanja,
+            'stem_element' => $stemElement,
+            'branch_element' => $branchElement,
+            'stem_element_hanja' => self::OHANG_HANJA[array_search($stemElement, self::OHANG)],
+            'branch_element_hanja' => self::OHANG_HANJA[array_search($branchElement, self::OHANG)],
+            'stem_yinyang' => $stemYinyang,
+            'branch_yinyang' => $branchYinyang,
+            'stem_color' => self::OHANG_COLORS[$stemColorIndex],
+            'branch_color' => self::OHANG_COLORS[$branchColorIndex],
+            'text' => $stem . $branch,
+            'hanja' => $stemHanja . $branchHanja,
+            'stem_index' => $pillar[0],
+            'branch_index' => $pillar[1],
+        ];
+    }
+    
+    /**
+     * 사주 문자열 반환 (예: "갑자 을축 병인 정묘")
+     * @return string
+     */
+    public function getSajuString() {
+        $result = $this->getResult();
+        return sprintf("%s %s %s %s",
+            $result['year_pillar']['text'],
+            $result['month_pillar']['text'],
+            $result['day_pillar']['text'],
+            $result['hour_pillar']['text']
+        );
+    }
+    
+    /**
+     * 일간(일주 천간) 반환
+     * @return string
+     */
+    public function getDayMaster() {
+        return self::CHEONGAN[$this->dayPillar[0]];
+    }
+    
+    /**
+     * 일간 오행 반환
+     * @return string
+     */
+    public function getDayMasterElement() {
+        return self::CHEONGAN_OHANG[$this->getDayMaster()];
+    }
+    
+    /**
+     * 년주 반환
+     */
+    public function getYearPillar() { return $this->yearPillar; }
+    
+    /**
+     * 월주 반환
+     */
+    public function getMonthPillar() { return $this->monthPillar; }
+    
+    /**
+     * 일주 반환
+     */
+    public function getDayPillar() { return $this->dayPillar; }
+    
+    /**
+     * 시주 반환
+     */
+    public function getHourPillar() { return $this->hourPillar; }
+    
+    /**
+     * 모든 천간/지지 인덱스 배열 반환
+     * @return array
+     */
+    public function getAllElements() {
+        return [
+            'stems' => [
+                $this->yearPillar[0],
+                $this->monthPillar[0],
+                $this->dayPillar[0],
+                $this->hourPillar[0],
+            ],
+            'branches' => [
+                $this->yearPillar[1],
+                $this->monthPillar[1],
+                $this->dayPillar[1],
+                $this->hourPillar[1],
+            ]
+        ];
+    }
+}

@@ -1,0 +1,858 @@
+<?php
+/**
+ * 운세 해석 엔진
+ * 사주 분석을 기반으로 상세한 운세 해석 제공
+ * 
+ * 기능:
+ * - 십신 분석
+ * - 격국 분석
+ * - 대운 분석
+ * - 세운 분석
+ * - 성격/연애/직업/재물/학문 운세
+ */
+
+require_once __DIR__ . '/SajuEngine.php';
+require_once __DIR__ . '/OhangAnalysis.php';
+
+class FortuneInterpreter {
+    
+    private $engine;
+    private $ohangAnalysis;
+    
+    // ===== 십신 (Ten Gods) =====
+    const SIPSIN = ['비견', '겁재', '식신', '상관', '편재', '정재', '편관', '정관', '편인', '정인'];
+    
+    // 십신 영문/설명
+    const SIPSIN_INFO = [
+        '비견' => ['desc' => '나와 같은 기운', 'meaning' => '자존심, 독립심, 경쟁심, 형제/동료 관계'],
+        '겁재' => ['desc' => '나를 도우나 경쟁', 'meaning' => '승부욕, 대인관계, 경쟁, 외향적 성격'],
+        '식신' => ['desc' => '내가 생하는 기운', 'meaning' => '표현력, 창의성, 식복, 자녀운, 예술적 감각'],
+        '상관' => ['desc' => '내가 극하는 표현', 'meaning' => '반항심, 창의력, 언변, 자유분방함'],
+        '편재' => ['desc' => '내가 극하는 재물', 'meaning' => '투기성 재물, 아버지, 사업 수완, 유동 자산'],
+        '정재' => ['desc' => '내가 다스리는 재물', 'meaning' => '안정적 재물, 저축, 근면, 아내/여자'],
+        '편관' => ['desc' => '나를 극하는 기운', 'meaning' => '권력, 명예, 도전, 변화, 스트레스'],
+        '정관' => ['desc' => '나를 바르게 이끌', 'meaning' => '명예, 직장, 질서, 도덕성, 남편/남자'],
+        '편인' => ['desc' => '나를 키우는 편모', 'meaning' => '학문, 비밀, 외로움, 특수한 재능'],
+        '정인' => ['desc' => '나를 키우는 기운', 'meaning' => '학문, 어머니, 인자함, 안정, 명예'],
+    ];
+    
+    // 오행 상생 순서 (생하는 방향)
+    const OHANG_CYCLE = ['목', '화', '토', '금', '수'];
+    
+    // 격국 유형
+    const GYEOKGUK_TYPES = [
+        'strong_self'    => '신강(身強)',
+        'weak_self'      => '신약(身弱)',
+        'food_god'       => '식신격(食神格)',
+        'wealth'         => '재성격(財星格)',
+        'official'       => '관성격(官星格)',
+        'seal'           => '인성격(印星格)',
+        'comparison'     => '비겁격(比劫格)',
+    ];
+    
+    // 12운성
+    const TWELVE_STAGES = ['장생', '목욕', '관대', '건록', '제왕', '쇠', '병', '사', '묘', '절', '태', '양'];
+    
+    /**
+     * 생성자
+     * @param SajuEngine $engine
+     */
+    public function __construct(SajuEngine $engine) {
+        $this->engine = $engine;
+        $this->ohangAnalysis = new OhangAnalysis($engine);
+    }
+    
+    /**
+     * 십신 분석
+     * @return array
+     */
+    public function analyzeSipsin() {
+        $dayMaster = $this->engine->getDayMaster();
+        $dayMasterIndex = array_search($dayMaster, SajuEngine::CHEONGAN);
+        $dayMasterYinyang = SajuEngine::CHEONGAN_YINYANG[$dayMasterIndex];
+        $dayMasterElement = SajuEngine::CHEONGAN_OHANG[$dayMaster];
+        
+        $result = $this->engine->getResult();
+        $pillars = ['year_pillar', 'month_pillar', 'day_pillar', 'hour_pillar'];
+        $pillarNames = ['년주', '월주', '일주', '시주'];
+        
+        $sipsinResult = [];
+        
+        foreach ($pillars as $i => $pillarKey) {
+            $pillar = $result[$pillarKey];
+            
+            // 천간의 십신
+            $stemSipsin = $this->getSipsin($dayMasterElement, $dayMasterYinyang,
+                $pillar['stem_element'], SajuEngine::CHEONGAN_YINYANG[$pillar['stem_index']]);
+            
+            // 지지의 십신
+            $branchSipsin = $this->getSipsin($dayMasterElement, $dayMasterYinyang,
+                $pillar['branch_element'], SajuEngine::JIJI_YINYANG[$pillar['branch_index']]);
+            
+            // 12운성
+            $twelveStage = $this->getTwelveStage($dayMasterIndex, $pillar['branch_index']);
+            
+            $sipsinResult[] = [
+                'pillar_name' => $pillarNames[$i],
+                'stem' => $pillar['stem'],
+                'branch' => $pillar['branch'],
+                'stem_sipsin' => $stemSipsin,
+                'branch_sipsin' => $branchSipsin,
+                'twelve_stage' => $twelveStage,
+                'stem_sipsin_info' => self::SIPSIN_INFO[$stemSipsin] ?? [],
+                'branch_sipsin_info' => self::SIPSIN_INFO[$branchSipsin] ?? [],
+            ];
+        }
+        
+        // 십신 통계
+        $sipsinCount = [];
+        foreach ($sipsinResult as $item) {
+            if ($item['pillar_name'] !== '일주' || true) {
+                $sipsinCount[$item['stem_sipsin']] = ($sipsinCount[$item['stem_sipsin']] ?? 0) + 1;
+                $sipsinCount[$item['branch_sipsin']] = ($sipsinCount[$item['branch_sipsin']] ?? 0) + 1;
+            }
+        }
+        
+        // 주요 십신 (가장 많은 십신)
+        arsort($sipsinCount);
+        $dominantSipsin = array_key_first($sipsinCount);
+        
+        return [
+            'pillars' => $sipsinResult,
+            'sipsin_count' => $sipsinCount,
+            'dominant_sipsin' => $dominantSipsin,
+            'dominant_sipsin_info' => self::SIPSIN_INFO[$dominantSipsin] ?? [],
+            'interpretation' => $this->interpretSipsin($sipsinCount, $dominantSipsin),
+        ];
+    }
+    
+    /**
+     * 두 오행 사이의 십신 관계 계산
+     * @param string $dayElement 일간 오행
+     * @param int $dayYinyang 일간 음양 (0=양, 1=음)
+     * @param string $targetElement 대상 오행
+     * @param int $targetYinyang 대상 음양
+     * @return string 십신 이름
+     */
+    private function getSipsin($dayElement, $dayYinyang, $targetElement, $targetYinyang) {
+        $sameYinyang = ($dayYinyang === $targetYinyang);
+        
+        // 같은 오행
+        if ($dayElement === $targetElement) {
+            return $sameYinyang ? '비견' : '겁재';
+        }
+        
+        // 내가 생하는 오행
+        $generates = self::OHANG_CYCLE[(array_search($dayElement, self::OHANG_CYCLE) + 1) % 5];
+        if ($targetElement === $generates) {
+            return $sameYinyang ? '식신' : '상관';
+        }
+        
+        // 내가 극하는 오행
+        $controls = self::OHANG_CYCLE[(array_search($dayElement, self::OHANG_CYCLE) + 2) % 5];
+        if ($targetElement === $controls) {
+            return $sameYinyang ? '편재' : '정재';
+        }
+        
+        // 나를 극하는 오행
+        $controlledBy = self::OHANG_CYCLE[(array_search($dayElement, self::OHANG_CYCLE) + 3) % 5];
+        if ($targetElement === $controlledBy) {
+            return $sameYinyang ? '편관' : '정관';
+        }
+        
+        // 나를 생하는 오행
+        $generatedBy = self::OHANG_CYCLE[(array_search($dayElement, self::OHANG_CYCLE) + 4) % 5];
+        if ($targetElement === $generatedBy) {
+            return $sameYinyang ? '편인' : '정인';
+        }
+        
+        return '비견'; // 기본값
+    }
+    
+    /**
+     * 12운성 계산
+     * @param int $dayStemIndex 일간 천간 인덱스
+     * @param int $branchIndex 지지 인덱스
+     * @return string
+     */
+    private function getTwelveStage($dayStemIndex, $branchIndex) {
+        // 12운성 시작 지지 (천간별)
+        // 갑→해(11), 을→오(6), 병→인(2), 정→유(9), 무→인(2)
+        // 기→유(9), 경→사(5), 신→자(0), 임→신(8), 계→묘(3)
+        $startBranch = [11, 6, 2, 9, 2, 9, 5, 0, 8, 3];
+        
+        $start = $startBranch[$dayStemIndex];
+        $isYang = SajuEngine::CHEONGAN_YINYANG[$dayStemIndex] === 0;
+        
+        if ($isYang) {
+            $index = ($branchIndex - $start + 12) % 12;
+        } else {
+            $index = ($start - $branchIndex + 12) % 12;
+        }
+        
+        return self::TWELVE_STAGES[$index];
+    }
+    
+    /**
+     * 십신 해석 생성
+     * @param array $sipsinCount
+     * @param string $dominant
+     * @return string
+     */
+    private function interpretSipsin($sipsinCount, $dominant) {
+        $interpretations = [
+            '비견' => '독립심이 강하고 자기 주관이 뚜렷합니다. 동료나 형제와의 관계에서 배울 점이 많으며, 경쟁을 통해 성장합니다.',
+            '겁재' => '활동적이고 사교적인 성격입니다. 대인관계가 넓지만 재물 관리에 주의가 필요합니다.',
+            '식신' => '예술적 감각과 창의력이 뛰어납니다. 식복이 있고 표현력이 좋아 사람들에게 호감을 줍니다.',
+            '상관' => '재능이 많고 언변이 좋습니다. 기존 틀에 얽매이지 않는 자유로운 사고를 합니다.',
+            '편재' => '사업적 수완이 좋고 재물을 모으는 능력이 있습니다. 투자와 사업에서 기회를 잘 포착합니다.',
+            '정재' => '근면하고 성실하여 안정적인 재물을 쌓아갑니다. 저축 습관이 좋고 계획적입니다.',
+            '편관' => '추진력과 리더십이 있습니다. 도전적인 삶을 살며 큰 업적을 이룰 수 있는 기질입니다.',
+            '정관' => '도덕적이고 질서를 중시합니다. 사회적 명예를 얻을 수 있으며 공직이나 큰 조직에 적합합니다.',
+            '편인' => '특수한 재능과 학문적 깊이를 가집니다. 독특한 분야에서 두각을 나타낼 수 있습니다.',
+            '정인' => '학문적 자질이 뛰어나고 인자한 성품을 가집니다. 교육이나 학문 분야에서 성공할 수 있습니다.',
+        ];
+        
+        return $interpretations[$dominant] ?? '다양한 기운이 조화를 이루고 있습니다.';
+    }
+    
+    /**
+     * 격국 분석
+     * @return array
+     */
+    public function analyzeGyeokguk() {
+        $dayMasterElement = $this->engine->getDayMasterElement();
+        $ohangData = $this->ohangAnalysis->analyze();
+        $ohangCount = $ohangData['ohang_count'];
+        
+        // 일간과 같은 오행 + 일간을 생하는 오행 = 신강/신약 판단
+        $generatedBy = self::OHANG_CYCLE[(array_search($dayMasterElement, self::OHANG_CYCLE) + 4) % 5];
+        $selfStrength = ($ohangCount[$dayMasterElement] ?? 0) + ($ohangCount[$generatedBy] ?? 0);
+        $totalElements = array_sum($ohangCount);
+        $isStrong = $selfStrength >= ($totalElements / 2);
+        
+        // 격국 유형 결정
+        $gyeokgukType = $isStrong ? 'strong_self' : 'weak_self';
+        
+        // 세부 격국 판단 (월지 기준)
+        $result = $this->engine->getResult();
+        $monthBranchElement = $result['month_pillar']['branch_element'];
+        $monthBranchSipsin = $this->getSipsin(
+            $dayMasterElement,
+            SajuEngine::CHEONGAN_YINYANG[$result['day_pillar']['stem_index']],
+            $monthBranchElement,
+            SajuEngine::JIJI_YINYANG[$result['month_pillar']['branch_index']]
+        );
+        
+        // 월지 십신별 세부 격국
+        $detailGyeokguk = $this->getDetailGyeokguk($monthBranchSipsin);
+        
+        // 용신(用神) 결정
+        $yongsin = $this->determineYongsin($isStrong, $dayMasterElement);
+        
+        return [
+            'is_strong' => $isStrong,
+            'type' => $gyeokgukType,
+            'type_name' => self::GYEOKGUK_TYPES[$gyeokgukType],
+            'self_strength' => $selfStrength,
+            'total_elements' => $totalElements,
+            'detail_gyeokguk' => $detailGyeokguk,
+            'yongsin' => $yongsin,
+            'interpretation' => $this->interpretGyeokguk($isStrong, $dayMasterElement, $detailGyeokguk),
+        ];
+    }
+    
+    /**
+     * 세부 격국 판단
+     * @param string $monthSipsin
+     * @return string
+     */
+    private function getDetailGyeokguk($monthSipsin) {
+        $map = [
+            '식신' => 'food_god', '상관' => 'food_god',
+            '편재' => 'wealth', '정재' => 'wealth',
+            '편관' => 'official', '정관' => 'official',
+            '편인' => 'seal', '정인' => 'seal',
+            '비견' => 'comparison', '겁재' => 'comparison',
+        ];
+        return $map[$monthSipsin] ?? 'comparison';
+    }
+    
+    /**
+     * 용신 결정
+     * @param bool $isStrong
+     * @param string $dayElement
+     * @return array
+     */
+    private function determineYongsin($isStrong, $dayElement) {
+        if ($isStrong) {
+            // 신강: 설기하거나 극하는 오행이 용신
+            $controls = self::OHANG_CYCLE[(array_search($dayElement, self::OHANG_CYCLE) + 2) % 5]; // 재성
+            $generates = self::OHANG_CYCLE[(array_search($dayElement, self::OHANG_CYCLE) + 1) % 5]; // 식상
+            return [
+                'element' => $controls,
+                'description' => sprintf("신강한 사주로 %s(%s)의 기운이 용신입니다. %s의 기운도 도움이 됩니다.",
+                    $controls, OhangAnalysis::OHANG_PROPERTIES[$controls]['hanja'],
+                    $generates
+                )
+            ];
+        } else {
+            // 신약: 일간을 생하거나 돕는 오행이 용신
+            $generatedBy = self::OHANG_CYCLE[(array_search($dayElement, self::OHANG_CYCLE) + 4) % 5]; // 인성
+            return [
+                'element' => $generatedBy,
+                'description' => sprintf("신약한 사주로 %s(%s)의 기운이 용신입니다. %s의 기운도 도움이 됩니다.",
+                    $generatedBy, OhangAnalysis::OHANG_PROPERTIES[$generatedBy]['hanja'],
+                    $dayElement
+                )
+            ];
+        }
+    }
+    
+    /**
+     * 격국 해석
+     * @param bool $isStrong
+     * @param string $dayElement
+     * @param string $detailType
+     * @return string
+     */
+    private function interpretGyeokguk($isStrong, $dayElement, $detailType) {
+        $typeNames = [
+            'food_god' => '식신격',
+            'wealth' => '재성격',
+            'official' => '관성격',
+            'seal' => '인성격',
+            'comparison' => '비겁격',
+        ];
+        
+        $typeInterpretations = [
+            'food_god' => '창의력과 표현력이 뛰어나며 예술, 요식업, 콘텐츠 분야에서 재능을 발휘할 수 있습니다. 식복이 있어 먹거리에 대한 안목도 갖추고 있습니다.',
+            'wealth' => '재물에 대한 감각이 좋고 사업이나 투자에서 성과를 낼 수 있습니다. 근면성실한 노력으로 재산을 모을 수 있는 격국입니다.',
+            'official' => '리더십과 책임감이 강하여 조직에서 높은 직위에 오를 수 있습니다. 공직이나 대기업에서 능력을 발휘합니다.',
+            'seal' => '학문적 재능이 뛰어나고 깊은 사색을 즐깁니다. 교육, 연구, 전문직 분야에서 두각을 나타냅니다.',
+            'comparison' => '독립적이고 자기 주관이 뚜렷합니다. 자영업이나 프리랜서로서 성공할 가능성이 높습니다.',
+        ];
+        
+        $strengthDesc = $isStrong ?
+            '신강한 사주로 자신감과 추진력이 강합니다. 에너지가 넘치므로 이를 적절히 발산하는 것이 중요합니다.' :
+            '신약한 사주로 섬세하고 신중합니다. 주변의 도움을 잘 활용하면 큰 성과를 이룰 수 있습니다.';
+        
+        $typeName = $typeNames[$detailType] ?? '혼합격';
+        $typeInterp = $typeInterpretations[$detailType] ?? '다양한 기운이 조화를 이루고 있습니다.';
+        
+        return sprintf("당신의 격국은 %s이며, %s입니다. %s %s",
+            $isStrong ? '신강(身強)' : '신약(身弱)',
+            $typeName,
+            $strengthDesc,
+            $typeInterp
+        );
+    }
+    
+    /**
+     * 대운 분석 (10년 단위 운세 흐름)
+     * @return array
+     */
+    public function analyzeDaeun() {
+        $result = $this->engine->getResult();
+        $gender = $result['input']['gender'];
+        $yearStemYinyang = SajuEngine::CHEONGAN_YINYANG[$result['year_pillar']['stem_index']];
+        
+        // 대운 순행/역행 결정
+        // 남자+양년간 또는 여자+음년간 → 순행
+        // 남자+음년간 또는 여자+양년간 → 역행
+        $isForward = ($gender === 'male' && $yearStemYinyang === 0) ||
+                     ($gender === 'female' && $yearStemYinyang === 1);
+        
+        // 월주를 기준으로 대운 생성
+        $monthStem = $result['month_pillar']['stem_index'];
+        $monthBranch = $result['month_pillar']['branch_index'];
+        
+        $daeunList = [];
+        $dayMasterElement = $this->engine->getDayMasterElement();
+        $dayMasterIndex = array_search($this->engine->getDayMaster(), SajuEngine::CHEONGAN);
+        $dayMasterYinyang = SajuEngine::CHEONGAN_YINYANG[$dayMasterIndex];
+        
+        // 대운 시작 나이 계산 (간략화)
+        $startAge = $this->calculateDaeunStartAge($result['input'], $isForward);
+        
+        for ($i = 1; $i <= 8; $i++) {
+            if ($isForward) {
+                $stem = ($monthStem + $i) % 10;
+                $branch = ($monthBranch + $i) % 12;
+            } else {
+                $stem = ($monthStem - $i + 10) % 10;
+                $branch = ($monthBranch - $i + 12) % 12;
+            }
+            
+            $stemChar = SajuEngine::CHEONGAN[$stem];
+            $branchChar = SajuEngine::JIJI[$branch];
+            $stemElement = SajuEngine::CHEONGAN_OHANG[$stemChar];
+            $branchElement = SajuEngine::JIJI_OHANG[$branchChar];
+            
+            $ageStart = $startAge + ($i - 1) * 10;
+            $ageEnd = $ageStart + 9;
+            
+            $sipsin = $this->getSipsin($dayMasterElement, $dayMasterYinyang,
+                $stemElement, SajuEngine::CHEONGAN_YINYANG[$stem]);
+            
+            $daeunList[] = [
+                'index' => $i,
+                'stem' => $stemChar,
+                'branch' => $branchChar,
+                'stem_hanja' => SajuEngine::CHEONGAN_HANJA[$stem],
+                'branch_hanja' => SajuEngine::JIJI_HANJA[$branch],
+                'stem_element' => $stemElement,
+                'branch_element' => $branchElement,
+                'age_start' => $ageStart,
+                'age_end' => $ageEnd,
+                'sipsin' => $sipsin,
+                'interpretation' => $this->interpretDaeun($sipsin, $stemElement, $branchElement, $ageStart, $ageEnd),
+                'score' => $this->calculateDaeunScore($dayMasterElement, $stemElement, $branchElement),
+            ];
+        }
+        
+        return [
+            'direction' => $isForward ? '순행' : '역행',
+            'start_age' => $startAge,
+            'daeun_list' => $daeunList,
+            'summary' => $this->summarizeDaeun($daeunList),
+        ];
+    }
+    
+    /**
+     * 대운 시작 나이 계산 (간략화)
+     * @param array $input
+     * @param bool $isForward
+     * @return int
+     */
+    private function calculateDaeunStartAge($input, $isForward) {
+        $month = $input['month'];
+        $day = $input['day'];
+        
+        // 절기까지의 거리를 기반으로 대운 시작 나이 계산
+        $sajuMonth = 1;
+        foreach (self::JEOLGI_DATES as $sm => $jeolgi) {
+            if ($month == $jeolgi[0] && $day >= $jeolgi[1]) {
+                $sajuMonth = $sm;
+            }
+        }
+        
+        // 간략화: 생일부터 다음/이전 절기까지의 일수 ÷ 3 = 대운 시작 나이
+        // 여기서는 평균적으로 3~7세 사이로 근사
+        $daysToNextJeolgi = abs(15 - $day); // 대략적 계산
+        $startAge = max(1, (int)round($daysToNextJeolgi / 3));
+        
+        // 범위 제한
+        return max(1, min(10, $startAge));
+    }
+    
+    /**
+     * 대운 해석
+     */
+    private function interpretDaeun($sipsin, $stemElement, $branchElement, $ageStart, $ageEnd) {
+        $sipsinMeanings = [
+            '비견' => '독립적인 활동과 자기 발전에 유리한 시기입니다. 동료와의 경쟁을 통해 성장하며, 자기만의 길을 개척하게 됩니다.',
+            '겁재' => '사교 활동이 활발해지고 새로운 인연이 많아지는 시기입니다. 다만 재물 관리에 주의가 필요합니다.',
+            '식신' => '창의적 활동과 표현에 유리한 시기입니다. 예술, 문화 활동이 풍성해지고 식복도 따릅니다.',
+            '상관' => '변화와 도전의 시기입니다. 기존 틀을 벗어나 새로운 시도를 하게 되며, 자유로운 활동이 많아집니다.',
+            '편재' => '재물운이 활발한 시기입니다. 투자나 사업에서 기회가 오며, 적극적인 재테크가 유리합니다.',
+            '정재' => '안정적인 수입과 재물 축적의 시기입니다. 근면한 노력의 결실을 맺으며, 경제적 안정을 이룹니다.',
+            '편관' => '변화와 도전이 많은 시기입니다. 리더십을 발휘하게 되며, 큰 성취를 위한 시련이 따를 수 있습니다.',
+            '정관' => '사회적 명예와 지위가 상승하는 시기입니다. 승진이나 사회적 인정을 받게 되며, 안정적인 성장을 합니다.',
+            '편인' => '학문과 자기 개발에 유리한 시기입니다. 새로운 분야를 공부하거나 자격증 취득에 좋습니다.',
+            '정인' => '학업과 명예가 상승하는 시기입니다. 지적 성장과 함께 좋은 스승이나 멘토를 만날 수 있습니다.',
+        ];
+        
+        return sprintf("%d세~%d세: %s", $ageStart, $ageEnd,
+            $sipsinMeanings[$sipsin] ?? '안정적인 시기입니다.');
+    }
+    
+    /**
+     * 대운 점수 계산
+     */
+    private function calculateDaeunScore($dayMasterElement, $stemElement, $branchElement) {
+        $score = 70; // 기본 점수
+        
+        // 일간을 생하는 오행이면 +
+        $generatedBy = self::OHANG_CYCLE[(array_search($dayMasterElement, self::OHANG_CYCLE) + 4) % 5];
+        if ($stemElement === $generatedBy || $branchElement === $generatedBy) $score += 10;
+        
+        // 같은 오행이면 +
+        if ($stemElement === $dayMasterElement || $branchElement === $dayMasterElement) $score += 5;
+        
+        // 극하는 오행이면 -
+        $controlledBy = self::OHANG_CYCLE[(array_search($dayMasterElement, self::OHANG_CYCLE) + 3) % 5];
+        if ($stemElement === $controlledBy || $branchElement === $controlledBy) $score -= 10;
+        
+        return max(30, min(100, $score + rand(-5, 10)));
+    }
+    
+    /**
+     * 대운 종합 요약
+     */
+    private function summarizeDaeun($daeunList) {
+        $bestPeriod = null;
+        $bestScore = 0;
+        
+        foreach ($daeunList as $daeun) {
+            if ($daeun['score'] > $bestScore) {
+                $bestScore = $daeun['score'];
+                $bestPeriod = $daeun;
+            }
+        }
+        
+        if ($bestPeriod) {
+            return sprintf("인생에서 가장 좋은 대운은 %d세~%d세(%s%s운)로, 이 시기에 중요한 결정이나 도전을 하면 좋은 결과를 얻을 수 있습니다.",
+                $bestPeriod['age_start'], $bestPeriod['age_end'],
+                $bestPeriod['stem'], $bestPeriod['branch']
+            );
+        }
+        
+        return "전반적으로 안정적인 대운 흐름을 보이고 있습니다.";
+    }
+    
+    /**
+     * 세운 분석 (올해의 운세)
+     * @param int|null $year 분석할 년도 (기본: 올해)
+     * @return array
+     */
+    public function analyzeSeun($year = null) {
+        if ($year === null) $year = (int)date('Y');
+        
+        $dayMasterElement = $this->engine->getDayMasterElement();
+        $dayMasterIndex = array_search($this->engine->getDayMaster(), SajuEngine::CHEONGAN);
+        $dayMasterYinyang = SajuEngine::CHEONGAN_YINYANG[$dayMasterIndex];
+        
+        // 해당 년도의 천간/지지
+        $yearStem = ($year - 4) % 10;
+        if ($yearStem < 0) $yearStem += 10;
+        $yearBranch = ($year - 4) % 12;
+        if ($yearBranch < 0) $yearBranch += 12;
+        
+        $stemChar = SajuEngine::CHEONGAN[$yearStem];
+        $branchChar = SajuEngine::JIJI[$yearBranch];
+        $stemElement = SajuEngine::CHEONGAN_OHANG[$stemChar];
+        $branchElement = SajuEngine::JIJI_OHANG[$branchChar];
+        
+        $sipsin = $this->getSipsin($dayMasterElement, $dayMasterYinyang,
+            $stemElement, SajuEngine::CHEONGAN_YINYANG[$yearStem]);
+        
+        // 총운 점수
+        $totalScore = $this->calculateSeunScore($dayMasterElement, $stemElement, $branchElement);
+        
+        // 카테고리별 운세 점수
+        $categories = $this->calculateCategoryScores($dayMasterElement, $stemElement, $branchElement, $sipsin);
+        
+        return [
+            'year' => $year,
+            'stem' => $stemChar,
+            'branch' => $branchChar,
+            'stem_hanja' => SajuEngine::CHEONGAN_HANJA[$yearStem],
+            'branch_hanja' => SajuEngine::JIJI_HANJA[$yearBranch],
+            'stem_element' => $stemElement,
+            'branch_element' => $branchElement,
+            'zodiac' => SajuEngine::ZODIAC_ANIMALS[$branchChar],
+            'sipsin' => $sipsin,
+            'total_score' => $totalScore,
+            'categories' => $categories,
+            'monthly' => $this->analyzeMonthlySeun($year, $dayMasterElement, $dayMasterYinyang),
+            'interpretation' => $this->interpretSeun($sipsin, $totalScore, $year),
+        ];
+    }
+    
+    /**
+     * 세운 점수 계산
+     */
+    private function calculateSeunScore($dayMasterElement, $stemElement, $branchElement) {
+        $score = 65;
+        
+        $generatedBy = self::OHANG_CYCLE[(array_search($dayMasterElement, self::OHANG_CYCLE) + 4) % 5];
+        if ($stemElement === $generatedBy) $score += 15;
+        if ($branchElement === $generatedBy) $score += 10;
+        
+        if ($stemElement === $dayMasterElement) $score += 5;
+        if ($branchElement === $dayMasterElement) $score += 5;
+        
+        $controlledBy = self::OHANG_CYCLE[(array_search($dayMasterElement, self::OHANG_CYCLE) + 3) % 5];
+        if ($stemElement === $controlledBy) $score -= 10;
+        if ($branchElement === $controlledBy) $score -= 5;
+        
+        return max(30, min(100, $score + rand(-5, 10)));
+    }
+    
+    /**
+     * 카테고리별 운세 점수
+     */
+    private function calculateCategoryScores($dayMasterElement, $stemElement, $branchElement, $sipsin) {
+        $baseScore = $this->calculateSeunScore($dayMasterElement, $stemElement, $branchElement);
+        
+        $categories = [
+            'total'    => ['name' => '총운', 'score' => $baseScore],
+            'study'    => ['name' => '학업운', 'score' => max(30, min(100, $baseScore + rand(-15, 15)))],
+            'wealth'   => ['name' => '재물운', 'score' => max(30, min(100, $baseScore + rand(-15, 15)))],
+            'health'   => ['name' => '건강운', 'score' => max(30, min(100, $baseScore + rand(-15, 15)))],
+            'love'     => ['name' => '연애운', 'score' => max(30, min(100, $baseScore + rand(-15, 15)))],
+            'career'   => ['name' => '사업운', 'score' => max(30, min(100, $baseScore + rand(-15, 15)))],
+        ];
+        
+        // 십신별 보정
+        if (in_array($sipsin, ['정재', '편재'])) $categories['wealth']['score'] = min(100, $categories['wealth']['score'] + 10);
+        if (in_array($sipsin, ['정관', '편관'])) $categories['career']['score'] = min(100, $categories['career']['score'] + 10);
+        if (in_array($sipsin, ['정인', '편인'])) $categories['study']['score'] = min(100, $categories['study']['score'] + 10);
+        if (in_array($sipsin, ['식신'])) $categories['health']['score'] = min(100, $categories['health']['score'] + 10);
+        
+        return $categories;
+    }
+    
+    /**
+     * 월별 세운 분석
+     */
+    private function analyzeMonthlySeun($year, $dayMasterElement, $dayMasterYinyang) {
+        $monthly = [];
+        
+        for ($m = 1; $m <= 12; $m++) {
+            $yearStem = ($year - 4) % 10;
+            if ($yearStem < 0) $yearStem += 10;
+            
+            $monthStemStart = ($yearStem % 5) * 2 + 2;
+            $monthStem = ($monthStemStart + $m - 1) % 10;
+            $monthBranch = ($m + 1) % 12;
+            
+            $stemChar = SajuEngine::CHEONGAN[$monthStem];
+            $stemElement = SajuEngine::CHEONGAN_OHANG[$stemChar];
+            $branchChar = SajuEngine::JIJI[$monthBranch];
+            $branchElement = SajuEngine::JIJI_OHANG[$branchChar];
+            
+            $score = $this->calculateSeunScore($dayMasterElement, $stemElement, $branchElement);
+            
+            $monthly[] = [
+                'month' => $m,
+                'stem' => $stemChar,
+                'branch' => $branchChar,
+                'score' => $score,
+                'brief' => $this->getMonthlyBrief($score),
+            ];
+        }
+        
+        return $monthly;
+    }
+    
+    /**
+     * 월별 간략 해석
+     */
+    private function getMonthlyBrief($score) {
+        if ($score >= 85) return '매우 좋은 달';
+        if ($score >= 70) return '좋은 달';
+        if ($score >= 55) return '보통의 달';
+        if ($score >= 40) return '주의가 필요한 달';
+        return '조심해야 할 달';
+    }
+    
+    /**
+     * 세운 해석
+     */
+    private function interpretSeun($sipsin, $score, $year) {
+        $scoreDesc = '';
+        if ($score >= 85) $scoreDesc = '매우 좋은 한 해가 될 것입니다.';
+        elseif ($score >= 70) $scoreDesc = '전반적으로 좋은 운세를 보이는 한 해입니다.';
+        elseif ($score >= 55) $scoreDesc = '보통의 운세로, 차분하게 준비하는 것이 좋습니다.';
+        elseif ($score >= 40) $scoreDesc = '주의가 필요한 한 해로, 신중한 결정이 중요합니다.';
+        else $scoreDesc = '도전과 시련의 한 해로, 인내와 지혜가 필요합니다.';
+        
+        $sipsinAdvice = [
+            '비견' => '동료나 형제와의 협력이 중요한 해입니다. 경쟁보다 화합을 통해 더 큰 성과를 이룰 수 있습니다.',
+            '겁재' => '재물 관리에 특히 주의하고, 새로운 인연을 소중히 여기세요.',
+            '식신' => '창의적 활동과 표현에 집중하면 좋은 결과가 있을 것입니다.',
+            '상관' => '변화를 두려워하지 말고 새로운 도전을 시도해 보세요.',
+            '편재' => '투자와 사업에서 좋은 기회가 올 수 있습니다. 다만 과욕은 금물입니다.',
+            '정재' => '꾸준한 노력이 결실을 맺는 해입니다. 저축과 안정적인 관리가 유리합니다.',
+            '편관' => '큰 변화나 승진의 기회가 있을 수 있습니다. 도전적으로 임하세요.',
+            '정관' => '사회적 인정과 명예가 따르는 해입니다. 책임감을 가지고 임하세요.',
+            '편인' => '공부나 자기 개발에 투자하면 좋은 해입니다.',
+            '정인' => '학업이나 시험에서 좋은 결과를 기대할 수 있습니다.',
+        ];
+        
+        return sprintf("%d년: %s %s", $year, $scoreDesc, $sipsinAdvice[$sipsin] ?? '');
+    }
+    
+    /**
+     * 종합 운세 해석 (성격, 연애, 직업, 재물, 학문, 인생)
+     * @return array
+     */
+    public function getComprehensiveFortune() {
+        $result = $this->engine->getResult();
+        $dayMaster = $result['day_master'];
+        $dayMasterElement = $result['day_master_element'];
+        $gender = $result['input']['gender'];
+        $ohang = $this->ohangAnalysis->analyze();
+        
+        return [
+            'personality' => $this->interpretPersonality($dayMaster, $dayMasterElement, $gender),
+            'love' => $this->interpretLove($dayMaster, $dayMasterElement, $gender),
+            'career' => $this->interpretCareer($dayMaster, $dayMasterElement),
+            'wealth' => $this->interpretWealth($dayMaster, $dayMasterElement),
+            'study' => $this->interpretStudy($dayMaster, $dayMasterElement),
+            'life_flow' => $this->interpretLifeFlow($dayMaster, $dayMasterElement, $gender),
+        ];
+    }
+    
+    /**
+     * 성격 분석
+     */
+    private function interpretPersonality($dayMaster, $element, $gender) {
+        $personalities = [
+            '갑' => '큰 나무처럼 곧고 강직한 성품을 지녔습니다. 리더십이 강하며 정의감이 넘칩니다. 한번 결심하면 끝까지 밀고 나가는 추진력이 있습니다. 다만 고집이 세다는 평을 듣기도 합니다. 자존심이 강하여 남에게 쉽게 고개를 숙이지 않습니다.',
+            '을' => '풀처럼 유연하고 적응력이 뛰어납니다. 부드러운 외모 속에 강인한 내면을 가지고 있습니다. 사람들과 잘 어울리며 사교적입니다. 예술적 감각이 뛰어나고 섬세합니다. 환경에 잘 적응하며 어떤 상황에서도 자신만의 길을 찾습니다.',
+            '병' => '태양처럼 밝고 따뜻한 성격입니다. 열정적이고 적극적이며 주변을 밝게 해줍니다. 리더십이 있고 사람들의 중심에 서는 것을 좋아합니다. 정이 많고 표현력이 풍부합니다. 때로는 감정 기복이 있을 수 있으나 금방 회복합니다.',
+            '정' => '촛불같이 따뜻하고 섬세한 성품입니다. 내면의 열정이 강하며 한 분야에 집중하는 힘이 있습니다. 감수성이 풍부하고 예술적 재능이 있습니다. 섬세한 관찰력으로 주변 사람들의 마음을 잘 읽습니다.',
+            '무' => '큰 산처럼 듬직하고 안정감이 있습니다. 포용력이 크고 인내심이 강합니다. 한번 맡은 일은 묵묵히 해내며 책임감이 강합니다. 변화보다 안정을 추구하며, 주변 사람들에게 의지가 되는 존재입니다.',
+            '기' => '기름진 땅처럼 풍요롭고 너그러운 성품입니다. 사람들을 잘 보살피고 배려심이 깊습니다. 실리적이면서도 정이 많습니다. 꼼꼼하고 세밀한 면이 있어 세부적인 일을 잘 처리합니다.',
+            '경' => '강철같이 강하고 결단력이 있습니다. 의리를 중시하며 정의감이 강합니다. 한번 결정하면 빠르게 실행에 옮깁니다. 리더십과 카리스마가 있어 조직에서 두각을 나타냅니다. 직설적인 성격으로 솔직합니다.',
+            '신' => '보석처럼 빛나고 세련된 감각을 지녔습니다. 미적 감각이 뛰어나고 완벽주의적 성향이 있습니다. 예민하고 섬세하며, 자신만의 기준이 확고합니다. 외유내강의 성격으로 겉으로는 부드러우나 내면은 강합니다.',
+            '임' => '큰 바다처럼 깊고 넓은 마음을 가졌습니다. 지혜롭고 포용력이 큽니다. 변화에 유연하게 대처하며 어떤 환경에서도 길을 찾습니다. 창의적이고 직관력이 뛰어납니다. 자유를 사랑하며 모험을 즐깁니다.',
+            '계' => '이슬비처럼 섬세하고 지적인 성품입니다. 깊은 사색과 분석력을 가지고 있습니다. 조용하지만 내면의 세계가 풍부합니다. 학문적 재능이 있으며 한 분야에 깊이 파고드는 집중력이 있습니다.',
+        ];
+        
+        return [
+            'title' => '성격 분석',
+            'content' => $personalities[$dayMaster] ?? '다양한 면모를 가진 복합적인 성격입니다.',
+        ];
+    }
+    
+    /**
+     * 연애운/결혼운
+     */
+    private function interpretLove($dayMaster, $element, $gender) {
+        $loveFortunes = [
+            '갑' => '연애에서 주도적인 편입니다. 자존심이 강해 쉽게 마음을 열지 않지만, 한번 사랑에 빠지면 진심을 다합니다. 배우자로는 부드럽고 포용력 있는 사람이 잘 맞습니다. 결혼 후에는 가정에 책임감을 가지며 안정적인 가정을 이룹니다.',
+            '을' => '사교적이고 매력적이어서 이성에게 인기가 많습니다. 연애에서 상대방에게 잘 맞추어 주며 부드럽게 관계를 이끕니다. 배우자로는 든든하고 강인한 사람이 잘 맞습니다. 결혼 후 가정의 분위기를 밝게 이끕니다.',
+            '병' => '정열적이고 화끈한 연애를 합니다. 첫눈에 반하는 타입이며 적극적으로 표현합니다. 밝고 긍정적인 에너지로 상대방을 매료시킵니다. 배우자로는 자신을 이해하고 지지해주는 사람이 좋습니다.',
+            '정' => '감성적이고 로맨틱한 연애를 합니다. 작은 것에도 감동하며 세심한 배려를 합니다. 한 사람에 깊이 빠지는 타입으로 이별을 어려워합니다. 진정한 교감을 나눌 수 있는 깊은 관계를 원합니다.',
+            '무' => '연애에서 포용적이고 든든한 편입니다. 급하지 않게 천천히 관계를 발전시킵니다. 한번 인연을 맺으면 오래 유지합니다. 결혼 후 안정적인 가정생활을 이루며 배우자에게 든든한 버팀목이 됩니다.',
+            '기' => '따뜻하고 세심한 연애를 합니다. 상대방을 잘 챙기고 배려하는 타입입니다. 안정적인 관계를 선호하며 가정적인 면이 강합니다. 결혼 후 화목한 가정을 만들어 갑니다.',
+            '경' => '의리 있고 직설적인 연애를 합니다. 솔직하게 감정을 표현하며 어정쩡한 관계를 싫어합니다. 한번 마음을 주면 끝까지 지킵니다. 배우자로는 부드럽고 이해심 있는 사람이 잘 맞습니다.',
+            '신' => '세련되고 로맨틱한 연애를 합니다. 이상형이 확고하며 타협하지 않는 편입니다. 외모와 감각을 중시하며 품위 있는 관계를 원합니다. 깊은 정신적 교감을 나눌 수 있는 상대를 찾습니다.',
+            '임' => '자유롭고 폭넓은 연애를 합니다. 매력적이어서 이성에게 인기가 많습니다. 속박을 싫어하며 자유로운 관계를 선호합니다. 하지만 진정한 인연을 만나면 깊은 사랑을 합니다.',
+            '계' => '조용하지만 깊은 연애를 합니다. 섬세하고 지적인 교류를 중시합니다. 표현은 서투르지만 내면의 사랑이 깊습니다. 지적이고 깊이 있는 대화를 나눌 수 있는 상대와 잘 맞습니다.',
+        ];
+        
+        return [
+            'title' => '연애운 · 결혼운',
+            'content' => $loveFortunes[$dayMaster] ?? '다양한 인연이 기다리고 있습니다.',
+        ];
+    }
+    
+    /**
+     * 직업운
+     */
+    private function interpretCareer($dayMaster, $element) {
+        $careers = [
+            '갑' => '리더십과 추진력이 강한 당신은 경영, 관리직, 정치, 법률 분야에 적합합니다. 큰 조직을 이끄는 CEO나 임원, 또는 독립적인 사업도 잘 어울립니다. 교육자나 상담사로서도 재능을 발휘할 수 있습니다. 건설, 목재, 가구 관련 업종도 좋습니다.',
+            '을' => '유연한 적응력을 바탕으로 서비스업, 예술, 디자인, 패션 분야에서 두각을 나타낼 수 있습니다. 화초, 꽃 관련 사업이나 인테리어 분야도 적합합니다. 중개/협상 업무에서 뛰어난 능력을 보입니다.',
+            '병' => '밝고 적극적인 성격으로 미디어, 엔터테인먼트, 교육, 홍보 분야에 적합합니다. 사람들 앞에 서는 직업이 잘 맞으며 방송인, 강사, 마케터로 성공할 수 있습니다.',
+            '정' => '섬세한 감각을 살려 예술, 문학, 음악, 공예 분야에서 재능을 발휘할 수 있습니다. IT, 기술 분야에서의 전문직도 적합합니다. 연구직이나 분석 업무에서도 뛰어납니다.',
+            '무' => '안정적이고 듬직한 성격으로 부동산, 건설, 농업, 공무원 분야에 적합합니다. 대기업 관리직이나 금융 분야에서도 능력을 발휘합니다. 신뢰를 바탕으로 한 사업이 유리합니다.',
+            '기' => '꼼꼼하고 배려심있는 성격으로 의료, 교육, 복지, 요식업 분야에 적합합니다. 농업이나 식품 관련 사업도 좋습니다. 서비스직에서 고객 만족도를 높이는 능력이 있습니다.',
+            '경' => '결단력과 추진력으로 군인, 경찰, 법률, 금융 분야에 적합합니다. 기계, 금속, IT 하드웨어 관련 업종도 좋습니다. 스포츠나 체력을 활용하는 분야에서도 성공할 수 있습니다.',
+            '신' => '세련된 감각과 완벽주의로 주얼리, 패션, 미용, 금융 분야에 적합합니다. 회계, 감사 등 정밀한 업무에서 능력을 발휘합니다. 의료 분야(치과, 성형 등)도 잘 맞습니다.',
+            '임' => '넓은 시야와 창의성으로 무역, 물류, 해운, 관광 분야에 적합합니다. IT, 소프트웨어 개발에서도 뛰어난 능력을 보입니다. 국제 비즈니스에서 역량을 발휘할 수 있습니다.',
+            '계' => '깊은 분석력과 지적 능력으로 연구, 학문, 컨설팅, 데이터 분석 분야에 적합합니다. 의학, 약학, 화학 관련 분야도 좋습니다. 작가, 기자 등 글쓰기 관련 직종에서도 재능을 발휘합니다.',
+        ];
+        
+        return [
+            'title' => '직업운 · 직장운',
+            'content' => $careers[$dayMaster] ?? '다양한 분야에서 능력을 발휘할 수 있습니다.',
+        ];
+    }
+    
+    /**
+     * 재물운
+     */
+    private function interpretWealth($dayMaster, $element) {
+        $wealth = [
+            '갑' => '큰 꿈을 가지고 사업을 통해 큰 재물을 모을 수 있는 사주입니다. 초반에는 투자가 필요하지만 중장기적으로 안정적인 수입을 기대할 수 있습니다. 부동산이나 주식 등 장기 투자에 유리합니다. 자기 사업을 통한 수입이 가장 큰 재물의 원천이 됩니다.',
+            '을' => '다양한 루트를 통해 재물이 들어오는 타입입니다. 한 가지 큰 수입보다 여러 작은 수입이 모여 재산을 이룹니다. 저축과 재테크에 관심을 가지면 안정적인 재물을 쌓을 수 있습니다.',
+            '병' => '번 만큼 쓰는 타입이지만 전체적으로 재물운이 좋습니다. 사람을 통해 재물이 들어오며, 사교 활동이 재물과 연결됩니다. 투자보다 실업 수입이 유리하며, 낙관적 성격이 재물을 끌어당깁니다.',
+            '정' => '꾸준히 모아가는 타입으로 갑자기 큰 돈보다 차곡차곡 쌓아가는 재물이 많습니다. 기술이나 재능을 활용한 수입이 유리합니다. 전문 분야에서의 성공이 재물로 이어집니다.',
+            '무' => '안정적이고 든든한 재물운을 가졌습니다. 부동산이나 토지를 통한 수입이 유리합니다. 급격한 변화보다 꾸준한 축적을 통해 재물을 모읍니다. 중년 이후 재물운이 더욱 좋아집니다.',
+            '기' => '실속 있는 재물운입니다. 외형적 화려함보다 실질적 수입에 능합니다. 식품이나 서비스업을 통한 수입이 유리합니다. 꾸준한 노력이 안정적인 재물로 이어집니다.',
+            '경' => '강한 추진력으로 사업에서 큰 수입을 올릴 수 있습니다. 금융이나 금속 관련 투자에 유리합니다. 결단력 있는 투자가 성공으로 이어지며, 중년 이후 재물이 안정됩니다.',
+            '신' => '세련된 감각을 활용한 사업이나 투자에서 수입을 올립니다. 귀금속이나 금융 관련 분야에서 재물이 들어옵니다. 안목과 심미안을 살린 사업이 성공으로 이어집니다.',
+            '임' => '큰 흐름을 읽는 능력으로 무역이나 유통에서 큰 재물을 모을 수 있습니다. 해외 관련 사업이나 투자에서 기회가 옵니다. 변동성이 있지만 전체적으로 풍요로운 재물운입니다.',
+            '계' => '지적 능력을 활용한 수입이 유리합니다. 전문직이나 연구 분야에서 안정적인 수입을 올립니다. 과하지 않게 알뜰하게 관리하는 능력이 있어 재물을 잘 지킵니다.',
+        ];
+        
+        return [
+            'title' => '재물운',
+            'content' => $wealth[$dayMaster] ?? '꾸준한 노력으로 안정적인 재물을 모을 수 있습니다.',
+        ];
+    }
+    
+    /**
+     * 학문운
+     */
+    private function interpretStudy($dayMaster, $element) {
+        $study = [
+            '갑' => '큰 그림을 보는 능력이 있어 경영학, 정치학, 법학 등 사회 과학 분야에서 두각을 나타냅니다. 리더십 관련 학문이나 교육학에도 재능이 있습니다.',
+            '을' => '유연한 사고력으로 인문학, 언어학, 예술 분야에서 재능을 발휘합니다. 여러 분야를 넘나들며 융합적 사고를 통해 새로운 관점을 제시합니다.',
+            '병' => '밝고 명확한 사고력으로 자연과학, 물리학 분야에 적합합니다. 교육학이나 커뮤니케이션 관련 학문에서도 뛰어난 역량을 보입니다.',
+            '정' => '섬세한 분석력으로 문학, 음악, 미술 등 예술 분야에서 깊이 있는 학문을 할 수 있습니다. 철학이나 심리학에 대한 이해도 뛰어납니다.',
+            '무' => '안정적이고 꾸준한 학습 태도로 건축학, 지질학, 농학 등 실용적 분야에 적합합니다. 역사학이나 고고학에도 관심과 재능이 있습니다.',
+            '기' => '꼼꼼한 학습 태도로 의학, 약학, 영양학 등 생명과학 분야에 적합합니다. 교육학이나 복지 관련 학문에서도 성과를 냅니다.',
+            '경' => '논리적 사고력으로 공학, 기계공학, 컴퓨터 과학 분야에 적합합니다. 법학이나 군사학에서도 뛰어난 능력을 발휘합니다.',
+            '신' => '정밀한 분석력으로 수학, 통계학, 회계학 분야에 적합합니다. 보석 감정이나 미술품 감정 등 전문적 분야에서도 두각을 나타냅니다.',
+            '임' => '넓은 시야와 창의성으로 해양학, 국제관계학, 무역학 분야에 적합합니다. IT, 프로그래밍 분야에서도 뛰어난 재능을 보입니다.',
+            '계' => '깊은 탐구심으로 화학, 생물학, 의학 분야에서 뛰어난 연구 성과를 낼 수 있습니다. 문학이나 철학에서도 깊이 있는 사유를 합니다.',
+        ];
+        
+        return [
+            'title' => '학문운',
+            'content' => $study[$dayMaster] ?? '꾸준한 학습으로 좋은 성과를 기대할 수 있습니다.',
+        ];
+    }
+    
+    /**
+     * 인생 전반 흐름
+     */
+    private function interpretLifeFlow($dayMaster, $element, $gender) {
+        $flows = [
+            '갑' => [
+                'early' => '어린 시절 활발하고 에너지가 넘치며, 학교에서 리더 역할을 자연스럽게 맡게 됩니다.',
+                'youth' => '청년기에 큰 포부를 품고 도전하며, 혼자서도 잘 해나가는 독립적인 모습을 보입니다.',
+                'middle' => '중년기에 자신만의 분야에서 확고한 위치를 잡으며, 리더십을 발휘하여 많은 사람을 이끕니다.',
+                'later' => '후반기에는 쌓아온 경험과 지혜로 후배들에게 존경받으며, 안정적인 노후를 보냅니다.',
+            ],
+            '을' => [
+                'early' => '어린 시절 사교적이고 예술적 감각이 뛰어나며, 다양한 친구들과 잘 어울립니다.',
+                'youth' => '청년기에 여러 경험을 통해 자신만의 방향을 찾아가며, 유연하게 환경에 적응합니다.',
+                'middle' => '중년기에 꾸준히 쌓아온 실력이 인정받으며, 한 분야에서 전문가로 자리잡습니다.',
+                'later' => '후반기에는 풍요로운 인간관계 속에서 행복한 시간을 보냅니다.',
+            ],
+        ];
+        
+        // 기본값 설정 (개별 일간별 데이터가 없는 경우)
+        $defaultFlow = [
+            'early' => '어린 시절 다양한 경험을 통해 기본기를 다지며, 자신만의 특성을 발견하게 됩니다.',
+            'youth' => '청년기에 적극적으로 세상에 도전하며, 인생의 방향을 설정하는 중요한 시기입니다.',
+            'middle' => '중년기에 걸쳐 사회적으로 안정을 이루며, 가정과 직업에서 균형을 찾아갑니다.',
+            'later' => '후반기에는 지혜로운 삶을 영위하며, 내면의 평화와 주변의 사랑을 넒게 누립니다.',
+        ];
+        
+        $flow = $flows[$dayMaster] ?? $defaultFlow;
+        
+        return [
+            'title' => '인생 전반 흐름',
+            'content' => sprintf(
+                "【초년운(0~20세)】\n%s\n\n【청년운(20~40세)】\n%s\n\n【중년운(40~60세)】\n%s\n\n【말년운(60세~)】\n%s",
+                $flow['early'], $flow['youth'], $flow['middle'], $flow['later']
+            ),
+        ];
+    }
+    
+    // ===== 절기 상수 참조 (SajuEngine에서 가져옴) =====
+    const JEOLGI_DATES = [
+        1  => [2, 4], 2  => [3, 6], 3  => [4, 5], 4  => [5, 6],
+        5  => [6, 6], 6  => [7, 7], 7  => [8, 7], 8  => [9, 8],
+        9  => [10, 8], 10 => [11, 7], 11 => [12, 7], 12 => [1, 6],
+    ];
+}
